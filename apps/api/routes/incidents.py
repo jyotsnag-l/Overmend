@@ -1043,3 +1043,17 @@ async def save_project_policy(
     await db.refresh(policy)
     return policy
 
+
+@router.post("/seed")
+async def trigger_seed():
+    """
+    Seed the database with realistic demo incidents, policies, and recovery records.
+    """
+    from seed_dashboard import seed_dashboard_data
+    try:
+        await seed_dashboard_data()
+        return {"status": "success", "message": "Database seeded with rich demo incidents"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
