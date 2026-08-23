@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "github-client"
+version = "0.1.0"
+description = "GitHub client package"
+requires-python = ">=3.11"
+dependencies = [
+    "pyjwt>=2.4.0",
+    "cryptography>=40.0.0",
+    "requests>=2.31.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["github_client*"]

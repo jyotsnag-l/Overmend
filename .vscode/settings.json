@@ -1,0 +1,14 @@
+{
+  "python.analysis.extraPaths": [
+    "./apps/api",
+    "./packages/shared",
+    "./packages/core",
+    "./packages/github-client",
+    "./packages/fault-localizer",
+    "./packages/patch-engine",
+    "./packages/sandbox-manager",
+    "./packages/trust-engine-core",
+    "./packages/recovery-sdk",
+    "./demo-repo"
+  ]
+}

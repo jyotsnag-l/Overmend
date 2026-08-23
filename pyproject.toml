@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent_sdk"
+version = "0.1.0"
+description = "Autonomous Software Recovery & Trust PaaS"
+authors = [{name = "Your Name", email = "you@example.com"}]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlalchemy[asyncio]>=2.0.34",
+    "aiosqlite>=0.20.0",
+    "celery>=5.4.0",
+    "redis>=5.0.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.8.0",
+    "python-dotenv>=1.0.0"
+]
+
+[tool.pyright]
+extraPaths = [
+    "apps/api",
+    "packages/shared",
+    "packages/core",
+    "packages/github-client",
+    "packages/fault-localizer",
+    "packages/patch-engine",
+    "packages/sandbox-manager",
+    "packages/trust-engine-core",
+    "packages/recovery-sdk",
+    "apps/recovery-worker",
+    "apps/github-worker",
+    "demo-repo"
+]
+

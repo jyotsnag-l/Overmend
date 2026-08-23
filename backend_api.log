@@ -1,0 +1,15 @@
+INFO:     Started server process [19480]
+INFO:     Waiting for application startup.
+{"timestamp": "2026-08-18T14:50:42.538281+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Starting up API service...", "file": "main.py", "line": 18, "function": "lifespan"}
+{"timestamp": "2026-08-18T14:50:42.562300+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Database tables verified/created successfully.", "file": "main.py", "line": 23, "function": "lifespan"}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+{"timestamp": "2026-08-18T14:50:43.950257+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Received request: POST /api/v1/projects", "file": "main.py", "line": 52, "function": "log_requests"}
+{"timestamp": "2026-08-18T14:50:43.975382+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Request completed with status code: 200", "file": "main.py", "line": 54, "function": "log_requests"}
+INFO:     127.0.0.1:56063 - "POST /api/v1/projects HTTP/1.1" 200 OK
+{"timestamp": "2026-08-18T14:50:47.675592+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Received request: POST /api/v1/events", "file": "main.py", "line": 52, "function": "log_requests"}
+{"timestamp": "2026-08-18T14:50:47.697100+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Request completed with status code: 200", "file": "main.py", "line": 54, "function": "log_requests"}
+INFO:     127.0.0.1:56070 - "POST /api/v1/events HTTP/1.1" 200 OK
+{"timestamp": "2026-08-18T14:50:50.693140+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Received request: GET /api/v1/incidents", "file": "main.py", "line": 52, "function": "log_requests"}
+{"timestamp": "2026-08-18T14:50:50.697342+00:00", "level": "INFO", "service": "api-service", "logger": "api", "message": "Request completed with status code: 200", "file": "main.py", "line": 54, "function": "log_requests"}
+INFO:     127.0.0.1:56071 - "GET /api/v1/incidents HTTP/1.1" 200 OK

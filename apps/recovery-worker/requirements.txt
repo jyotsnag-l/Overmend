@@ -1,0 +1,10 @@
+celery>=5.3.0
+redis>=5.0.0
+httpx>=0.24.0
+-e ../../packages/shared
+-e ../../packages/core
+-e ../../packages/fault-localizer
+-e ../../packages/patch-engine
+-e ../../packages/sandbox-manager
+-e ../../packages/trust-engine-core
+-e ../../packages/github-client

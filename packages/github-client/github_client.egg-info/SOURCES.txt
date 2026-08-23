@@ -1,0 +1,6 @@
+pyproject.toml
+github_client/__init__.py
+github_client.egg-info/PKG-INFO
+github_client.egg-info/SOURCES.txt
+github_client.egg-info/dependency_links.txt
+github_client.egg-info/top_level.txt

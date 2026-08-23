@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fault-localizer"
+version = "0.1.0"
+description = "Fault localizer package"
+requires-python = ">=3.11"
+dependencies = [
+    "gitpython"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fault_localizer*"]

@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: agent_sdk
+Version: 0.1.0
+Summary: Autonomous Software Recovery & Trust PaaS
+Author: Your Name
+Author-email: Your Name <you@example.com>
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn[standard]>=0.30.0
+Requires-Dist: sqlalchemy[asyncio]>=2.0.34
+Requires-Dist: aiosqlite>=0.20.0
+Requires-Dist: celery>=5.4.0
+Requires-Dist: redis>=5.0.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: pydantic>=2.8.0
+Requires-Dist: python-dotenv>=1.0.0

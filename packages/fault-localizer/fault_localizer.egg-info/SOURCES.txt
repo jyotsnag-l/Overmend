@@ -1,0 +1,8 @@
+pyproject.toml
+fault_localizer/__init__.py
+fault_localizer/repository.py
+fault_localizer.egg-info/PKG-INFO
+fault_localizer.egg-info/SOURCES.txt
+fault_localizer.egg-info/dependency_links.txt
+fault_localizer.egg-info/requires.txt
+fault_localizer.egg-info/top_level.txt

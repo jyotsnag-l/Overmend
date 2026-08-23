@@ -1,0 +1,137 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    margin: 0;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #F8FAFC;
+    color: #0F172A;
+    overflow-x: hidden;
+    letter-spacing: -0.01em;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    color: #0F172A;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Sleek Scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #F8FAFC;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #CBD5E1;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4F46E5;
+  }
+}
+
+@layer utilities {
+  /* Premium White Surface Cards & Panels */
+  .panel-card {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 18px;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+  }
+
+  .panel-card-hover {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 18px;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+    transition: all 0.15s ease;
+  }
+  .panel-card-hover:hover {
+    border-color: #4F46E5;
+    box-shadow: 0 4px 12px 0 rgba(79, 70, 229, 0.08);
+  }
+
+  /* Featured Periwinkle Indigo Card */
+  .card-periwinkle {
+    background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
+    color: #FFFFFF;
+    border-radius: 18px;
+    box-shadow: 0 4px 14px 0 rgba(79, 70, 229, 0.25);
+  }
+
+  /* Vibrant Light Mode Pill Badges */
+  .pill-mint {
+    background-color: #ECFDF5;
+    color: #059669;
+    border: 1px solid #A7F3D0;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 2px 10px;
+  }
+
+  .pill-coral {
+    background-color: #FEF2F2;
+    color: #DC2626;
+    border: 1px solid #FCA5A5;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 2px 10px;
+  }
+
+  .pill-peach {
+    background-color: #FFFBEB;
+    color: #D97706;
+    border: 1px solid #FDE68A;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 2px 10px;
+  }
+
+  .pill-blue {
+    background-color: #EEF2FF;
+    color: #4F46E5;
+    border: 1px solid #C7D2FE;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 2px 10px;
+  }
+
+  /* Buttons */
+  .btn-periwinkle {
+    background-color: #4F46E5;
+    color: #FFFFFF;
+    border-radius: 9999px;
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+    transition: background-color 0.15s ease;
+  }
+  .btn-periwinkle:hover {
+    background-color: #4338CA;
+  }
+
+  .btn-dark {
+    background-color: #F1F5F9;
+    color: #0F172A;
+    border: 1px solid #CBD5E1;
+    border-radius: 9999px;
+    font-weight: 600;
+    transition: background-color 0.15s ease;
+  }
+  .btn-dark:hover {
+    background-color: #E2E8F0;
+  }
+}

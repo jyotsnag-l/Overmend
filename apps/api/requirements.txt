@@ -1,0 +1,23 @@
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.28.0
+psycopg2-binary>=2.9.6
+alembic>=1.11.0
+pgvector>=0.2.0
+redis>=5.0.0
+celery>=5.3.0
+httpx>=0.24.0
+python-multipart>=0.0.6
+pyjwt>=2.4.0
+cryptography>=40.0.0
+# -e ../../packages/shared
+# -e ../../packages/recovery-sdk
+# -e ../../packages/core
+# -e ../../packages/fault-localizer
+# -e ../../packages/patch-engine
+# -e ../../packages/sandbox-manager
+# -e ../../packages/trust-engine-core
+# -e ../../packages/github-client

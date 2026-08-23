@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: core
+Version: 0.1.0
+Summary: Core library for Autonomous Software Recovery & Trust PaaS
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.11
+Requires-Dist: shared
