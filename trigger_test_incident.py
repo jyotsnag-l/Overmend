@@ -3,12 +3,25 @@ import json
 
 def trigger_incident():
     url = "http://localhost:8000/api/v1/events"
-    project_id = "proj_f1206079"
+    project_id = "proj_seed"
     
     headers = {
         "X-Project-ID": project_id,
+        "X-User-ID": "usr_seed",
+        "X-User-Email": "seed_user@example.com",
+        "X-Organization-ID": "org_seed",
         "Content-Type": "application/json"
     }
+    
+    # Ensure project exists
+    try:
+        httpx.post("http://localhost:8000/api/v1/projects", json={
+            "id": project_id,
+            "name": "API Gateway & Core Services",
+            "repository": "seed-org/seed-repo"
+        }, headers=headers, timeout=5.0)
+    except Exception:
+        pass
     
     payload = {
         "project_id": project_id,
@@ -21,11 +34,11 @@ TypeError: Cannot read properties of undefined (reading 'layer_data')""",
         "environment": "production",
         "context": {
             "module": "osi-tcp-simulator",
-            "repository": "jyotsnag-l/tcpvsosi"
+            "repository": "seed-org/seed-repo"
         }
     }
     
-    print("Sending failure event to Autonomous Recovery PaaS for jyotsnag-l/tcpvsosi...")
+    print("Sending failure event to Autonomous Recovery PaaS...")
     try:
         response = httpx.post(url, json=payload, headers=headers, timeout=10.0)
         if response.status_code == 200:
@@ -40,6 +53,7 @@ TypeError: Cannot read properties of undefined (reading 'layer_data')""",
             print(f"Error {response.status_code}: {response.text}")
     except Exception as e:
         print(f"Failed to connect to API: {e}")
+
 
 if __name__ == "__main__":
     trigger_incident()

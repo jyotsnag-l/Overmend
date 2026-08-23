@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { 
-  Search, ChevronRight, Archive, RefreshCw, AlertTriangle
+  Search, ChevronRight, Archive, RefreshCw, AlertTriangle, Zap
 } from 'lucide-react';
-import { fetchIncidents, Incident } from '../api';
+import { fetchIncidents, Incident, triggerDemoIncident } from '../api';
 
 interface IncidentsPageProps {
   onNavigate: (page: string, params?: Record<string, any>) => void;
@@ -12,6 +12,7 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [injecting, setInjecting] = useState(false);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -32,6 +33,29 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
     }
   };
 
+  const handleInjectEvent = async () => {
+    setInjecting(true);
+    try {
+      const errorScenarios = [
+        { type: 'ZeroDivisionError', msg: 'division by zero in calculate_refund_rate()', file: 'payments/service.py', line: 184 },
+        { type: 'TypeError', msg: "unsupported operand type(s) for +: 'NoneType' and 'int'", file: 'analytics/counter.py', line: 28 },
+        { type: 'KeyError', msg: "'EXPIRED_CODE' in calculate_order_total()", file: 'orders.py', line: 14 },
+        { type: 'AttributeError', msg: "'NoneType' object has no attribute 'get_rate_limit'", file: 'gateway/rate_limiter.py', line: 92 }
+      ];
+      const pick = errorScenarios[Math.floor(Math.random() * errorScenarios.length)];
+      const inc = await triggerDemoIncident(pick.type, pick.msg, pick.file, pick.line);
+      await loadIncidents();
+      if (inc && inc.id) {
+        onNavigate('IncidentDetail', { incidentId: inc.id });
+      }
+    } catch (err) {
+      console.error('Failed to inject demo incident', err);
+      setError('Failed to trigger demo incident');
+    } finally {
+      setInjecting(false);
+    }
+  };
+
   useEffect(() => {
     loadIncidents();
   }, []);
@@ -49,6 +73,11 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
 
     return matchesSearch && matchesStatus && matchesSeverity && matchesEnv;
   });
+
+  const newIngestedCount = incidents.filter(i => ['DETECTED', 'TRIAGED', 'LOCALIZED', 'INVESTIGATING'].includes(i.status)).length;
+  const awaitReviewCount = incidents.filter(i => ['HUMAN_REVIEW', 'DECISION', 'PATCH_GENERATED'].includes(i.status)).length;
+  const sandboxCiCount = incidents.filter(i => ['SANDBOX_RUNNING', 'TESTED', 'TRUST_EVALUATED', 'PENDING_CI'].includes(i.status)).length;
+  const verifiedMergedCount = incidents.filter(i => ['VERIFIED', 'MERGED'].includes(i.status)).length;
 
   const getSeverityBadge = (sev: string) => {
     const styles: Record<string, string> = {
@@ -105,13 +134,23 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
           </h2>
           <p className="text-xs text-[#64748B] mt-0.5 font-sans">Active telemetry records, fault locations, and remediation lifecycle</p>
         </div>
-        <button 
-          onClick={() => { setLoading(true); loadIncidents(); }}
-          className="btn-dark px-4 py-2 text-xs font-semibold flex items-center space-x-2"
-        >
-          <RefreshCw className="h-3.5 w-3.5 text-[#64748B]" />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={handleInjectEvent}
+            disabled={injecting}
+            className="btn-periwinkle px-4 py-2 text-xs font-bold flex items-center space-x-2 shadow-sm disabled:opacity-50"
+          >
+            <Zap className={`h-3.5 w-3.5 ${injecting ? 'animate-spin' : ''}`} />
+            <span>{injecting ? 'Injecting Event...' : 'Inject Failure Event'}</span>
+          </button>
+          <button 
+            onClick={() => { setLoading(true); loadIncidents(); }}
+            className="btn-dark px-4 py-2 text-xs font-semibold flex items-center space-x-2"
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-[#64748B]" />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -129,10 +168,10 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
             New Ingested
           </div>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-3xl font-extrabold text-[#0F172A]">12</span>
-            <span className="pill-mint font-bold">+ 2.6%</span>
+            <span className="text-3xl font-extrabold text-[#0F172A]">{newIngestedCount}</span>
+            <span className="pill-mint font-bold">Active</span>
           </div>
-          <p className="text-[10px] text-[#64748B] font-medium">Than last week</p>
+          <p className="text-[10px] text-[#64748B] font-medium">Under fault localization</p>
         </div>
 
         {/* Card 2 */}
@@ -141,10 +180,10 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
             Await Review
           </div>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-3xl font-extrabold text-[#0F172A]">20</span>
-            <span className="pill-mint font-bold">+ 2.0%</span>
+            <span className="text-3xl font-extrabold text-[#0F172A]">{awaitReviewCount}</span>
+            <span className="pill-mint font-bold">Queue</span>
           </div>
-          <p className="text-[10px] text-[#64748B] font-medium">Than last week</p>
+          <p className="text-[10px] text-[#64748B] font-medium">Human governance required</p>
         </div>
 
         {/* Card 3 */}
@@ -153,10 +192,10 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
             Sandbox CI
           </div>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-3xl font-extrabold text-[#0F172A]">57</span>
-            <span className="pill-coral font-bold">- 0.6%</span>
+            <span className="text-3xl font-extrabold text-[#0F172A]">{sandboxCiCount}</span>
+            <span className="pill-blue font-bold">Testing</span>
           </div>
-          <p className="text-[10px] text-[#64748B] font-medium">Than last week</p>
+          <p className="text-[10px] text-[#64748B] font-medium">Docker test container validation</p>
         </div>
 
         {/* Card 4 */}
@@ -165,12 +204,13 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
             Verified & Merged
           </div>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-3xl font-extrabold text-[#0F172A]">98</span>
-            <span className="pill-mint font-bold">+ 2.8%</span>
+            <span className="text-3xl font-extrabold text-[#0F172A]">{verifiedMergedCount}</span>
+            <span className="pill-mint font-bold">Repaired</span>
           </div>
-          <p className="text-[10px] text-[#64748B] font-medium">Than last week</p>
+          <p className="text-[10px] text-[#64748B] font-medium">Autonomous self-healing completed</p>
         </div>
       </div>
+
 
       {/* FILTER & TABLE SECTION */}
       <section className="panel-card p-5 space-y-4">
@@ -208,6 +248,17 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
               <option value="CRITICAL">CRITICAL</option>
               <option value="HIGH">HIGH</option>
               <option value="MEDIUM">MEDIUM</option>
+            </select>
+
+            <select 
+              value={envFilter}
+              onChange={(e) => setEnvFilter(e.target.value)}
+              className="bg-[#F1F5F9] border border-[#CBD5E1] rounded-xl px-3 py-2 text-xs text-[#0F172A] focus:outline-none cursor-pointer font-semibold"
+            >
+              <option value="ALL">All Environments</option>
+              <option value="production">Production</option>
+              <option value="staging">Staging</option>
+              <option value="development">Development</option>
             </select>
           </div>
         </div>
@@ -251,13 +302,13 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
                       {inc.affected_repository || 'seed-org/seed-repo'}
                     </td>
                     <td className="py-3.5 px-4">
-                      <span className="pill-coral font-bold">{inc.severity}</span>
+                      {getSeverityBadge(inc.severity)}
                     </td>
                     <td className="py-3.5 px-4 text-[#64748B] text-xs font-mono">
                       {new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="py-3.5 px-4">
-                      <span className="pill-mint font-bold">{inc.status}</span>
+                      {getStatusBadge(inc.status)}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <span className="text-xs font-bold text-[#6C8EFF] hover:underline flex items-center justify-end space-x-1">
@@ -271,6 +322,7 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
             </tbody>
           </table>
         </div>
+
       </section>
     </div>
   );

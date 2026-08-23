@@ -68,26 +68,37 @@ def setup_test_database():
 def seed_org_project(org_id: str, proj_id: str, repo: str = "org/repo") -> Tuple[models.Organization, models.Project]:
     async def _run():
         async with AsyncSessionLocal() as db:
-            org = models.Organization(id=org_id, name=f"Org {org_id}")
-            project = models.Project(id=proj_id, organization_id=org_id, name=f"Project {proj_id}", repository=repo)
+            org_res = await db.execute(select(models.Organization).where(models.Organization.id == org_id))
+            org = org_res.scalar_one_or_none()
+            if not org:
+                org = models.Organization(id=org_id, name=f"Org {org_id}")
+                db.add(org)
+
+            proj_res = await db.execute(select(models.Project).where(models.Project.id == proj_id))
+            project = proj_res.scalar_one_or_none()
+            if not project:
+                project = models.Project(id=proj_id, organization_id=org_id, name=f"Project {proj_id}", repository=repo)
+                db.add(project)
             
             # Create a project policy
-            policy = models.ProjectPolicy(
-                id=f"pol_{proj_id}",
-                organization_id=org_id,
-                project_id=proj_id,
-                anomaly_frequency_threshold=5,
-                anomaly_zscore_threshold=3.0,
-                anomaly_ewma_threshold=5.0,
-                severity_rules={}
-            )
+            pol_res = await db.execute(select(models.ProjectPolicy).where(models.ProjectPolicy.project_id == proj_id))
+            policy = pol_res.scalar_one_or_none()
+            if not policy:
+                policy = models.ProjectPolicy(
+                    id=f"pol_{proj_id}",
+                    organization_id=org_id,
+                    project_id=proj_id,
+                    anomaly_frequency_threshold=5,
+                    anomaly_zscore_threshold=3.0,
+                    anomaly_ewma_threshold=5.0,
+                    severity_rules={}
+                )
+                db.add(policy)
             
-            db.add(org)
-            db.add(project)
-            db.add(policy)
             await db.commit()
             return org, project
     return run_sync(_run())
+
 
 
 # --- TESTS ---

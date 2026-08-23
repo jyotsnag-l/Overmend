@@ -468,27 +468,48 @@ async def process_event_pipeline(
 
     # Determine actionability
     is_actionable = (severity in {HIGH, CRITICAL}) or is_anomaly
-    
-    # We do not want to trigger celery if environment is development
     if env.lower() == "development":
         is_actionable = False
+
         
     await db.commit()
     await db.refresh(incident)
 
-    # Trigger Celery Worker task asynchronously if actionable and not enqueued yet
-    if is_actionable and not incident.recovery_job_enqueued:
+    # Trigger Celery Worker task or background fallback if actionable and not enqueued yet
+    bypass_celery = os.getenv("BYPASS_CELERY", "false").lower() == "true"
+    if is_actionable and not incident.recovery_job_enqueued and not bypass_celery:
+
         incident.recovery_job_enqueued = True
         await db.commit()
         
-        if os.getenv("BYPASS_CELERY", "false").lower() != "true":
+        celery_sent = False
+        try:
+            celery_app.send_task(
+                "tasks.run_recovery_pipeline",
+                args=[incident.id, affected_repository, stack_trace_str]
+            )
+            logger.info(f"Enqueued recovery task via Celery for incident {incident.id}")
+            celery_sent = True
+        except Exception as e:
+            logger.warning(f"Celery unavailable ({e}). Falling back to background thread recovery task for incident {incident.id}")
+
+        if not celery_sent:
             try:
-                celery_app.send_task(
-                    "tasks.run_recovery_pipeline",
-                    args=[incident.id, affected_repository, stack_trace_str]
-                )
-                logger.info(f"Enqueued recovery task for incident {incident.id}")
-            except Exception as e:
-                logger.warning(f"Failed to trigger recovery pipeline: Celery worker / Redis broker unavailable: {e}")
+                import sys
+                import importlib.util
+                worker_tasks_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../recovery-worker/tasks.py"))
+                spec = importlib.util.spec_from_file_location("recovery_worker_tasks", worker_tasks_path)
+                if spec and spec.loader:
+                    recovery_worker_tasks = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(recovery_worker_tasks)
+                    asyncio.create_task(asyncio.to_thread(
+                        recovery_worker_tasks.run_recovery_pipeline.run,
+                        incident.id, affected_repository, stack_trace_str
+                    ))
+                    logger.info(f"Successfully launched background thread recovery task for incident {incident.id}")
+            except Exception as fallback_err:
+                logger.error(f"Fallback background recovery task failed for incident {incident.id}: {fallback_err}", exc_info=True)
                 
     return incident
+
+

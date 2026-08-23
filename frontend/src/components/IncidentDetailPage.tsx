@@ -96,8 +96,19 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
     );
   }
 
-  const stageKeys = TIMELINE_STAGES.map(s => s.id);
-  const currentStageIndex = Math.max(0, stageKeys.indexOf(incident.status.replace('HUMAN_REVIEW', 'DECISION').replace('PENDING_CI', 'PR_CREATED')));
+  const getStageIndex = (statusStr: string) => {
+    const s = (statusStr || '').toUpperCase();
+    if (['VERIFIED', 'MERGED', 'RESOLVED', 'CLOSED'].includes(s)) return 7;
+    if (['PR_CREATED', 'PENDING_CI', 'CI_PASSED', 'CI_RUNNING'].includes(s)) return 6;
+    if (['DECISION', 'AUTO_MERGE', 'HUMAN_REVIEW', 'APPROVED', 'PENDING_REVIEW', 'REJECTED'].includes(s)) return 5;
+    if (['TRUST_EVALUATED'].includes(s)) return 4;
+    if (['SANDBOX_RUNNING', 'TESTED'].includes(s)) return 3;
+    if (['PATCH_GENERATED', 'PATCH_SYNTHESIZED'].includes(s)) return 2;
+    if (['LOCALIZED'].includes(s)) return 1;
+    return 0; // DETECTED, TRIAGED
+  };
+
+  const currentStageIndex = getStageIndex(incident.status);
 
   const renderFaultCodeSnippet = () => {
     const file = incident.fault_locations[0]?.file_path || 'auth/verification.py';
@@ -115,13 +126,13 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
           </span>
         </div>
         <div className="p-4 font-mono text-xs text-stone-300 space-y-1 bg-stone-950">
-          <div className="text-stone-500"><span className="w-8 inline-block text-right mr-4 select-none">{line - 2}</span> def {func}(payload, headers):</div>
-          <div className="text-stone-500"><span className="w-8 inline-block text-right mr-4 select-none">{line - 1}</span>     # Extract signature header from incoming webhook</div>
+          <div className="text-stone-500"><span className="w-8 inline-block text-right mr-4 select-none">{Math.max(1, line - 2)}</span> def {func}(*args, **kwargs):</div>
+          <div className="text-stone-500"><span className="w-8 inline-block text-right mr-4 select-none">{Math.max(1, line - 1)}</span>     # Target execution block</div>
           <div className="bg-rose-950/60 border-l-2 border-rose-500 py-1 text-rose-200 px-1 rounded-r">
             <span className="w-8 inline-block text-right mr-4 text-rose-400 font-bold select-none">{line}</span>
-            <span className="font-semibold text-rose-200">{incident.stack_trace.split('\n').pop()?.trim() || 'sig = headers["stripe_signature"]'}</span>
+            <span className="font-semibold text-rose-200">{incident.stack_trace.split('\n').pop()?.trim() || 'return execute_operation()'}</span>
           </div>
-          <div className="text-stone-500"><span className="w-8 inline-block text-right mr-4 select-none">{line + 1}</span>     return verify_hmac(payload, sig)</div>
+          <div className="text-stone-500"><span className="w-8 inline-block text-right mr-4 select-none">{line + 1}</span>     return result</div>
         </div>
       </div>
     );
@@ -152,41 +163,41 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
     );
   };
 
+  const isAutoMerged = ['VERIFIED', 'MERGED', 'RESOLVED'].includes(incident.status.toUpperCase());
+
   return (
     <div className="space-y-6">
-      {/* Navigation */}
-      <button 
-        onClick={() => onNavigate('Incidents')}
-        className="btn-dark px-4 py-2 text-xs font-semibold flex items-center space-x-2 w-fit"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        <span>Back to Incidents</span>
-      </button>
-
-      {/* Title & Metadata Card */}
-      <div className="panel-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-5">
-        <div className="space-y-2">
-          <div className="flex items-center space-x-2.5">
-            <span className="pill-coral font-bold">
+      {/* TOP BREADCRUMB & HEADER */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-[#E2E8F0] pb-5 gap-4">
+        <div className="space-y-1">
+          <button 
+            onClick={() => onNavigate('Incidents')}
+            className="btn-dark px-4 py-2 text-xs font-semibold flex items-center space-x-2 w-fit mb-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span>Back to Incidents</span>
+          </button>
+          
+          <div className="flex items-center space-x-3">
+            <h2 className="text-2xl font-extrabold text-[#0F172A] tracking-tight font-mono">
               {incident.exception_type}
-            </span>
-            <span className="text-xs text-[#64748B] font-mono">Incident #{incident.id.slice(0, 12)}</span>
-            <span className="pill-mint font-bold">
-              {incident.status}
+            </h2>
+            <span className={`text-xs font-mono font-bold px-3 py-1 rounded-full border ${
+              isAutoMerged 
+                ? 'bg-emerald-50 text-[#059669] border-emerald-300' 
+                : (incident.status as string) === 'HUMAN_REVIEW'
+                ? 'bg-amber-50 text-[#D97706] border-amber-300'
+                : 'bg-indigo-50 text-[#4F46E5] border-indigo-300'
+            }`}>
+              {isAutoMerged ? 'AUTO-MERGED' : incident.status}
             </span>
           </div>
-          <h2 className="text-xl font-bold text-[#0F172A]">{incident.exception_message}</h2>
-          <p className="text-xs text-[#64748B] font-sans">
-            Affected repository: <code className="text-[#4F46E5] font-bold">{incident.affected_repository || 'seed-org/seed-repo'}</code>
-          </p>
+          <p className="text-xs text-[#64748B] font-mono">{incident.exception_message}</p>
         </div>
-        <div className="flex items-center space-x-6 border-t md:border-t-0 md:border-l border-[#E2E8F0] pt-4 md:pt-0 md:pl-6">
-          <div>
-            <span className="text-[10px] text-[#64748B] font-mono uppercase font-bold block">First Detected</span>
-            <span className="text-xs font-mono text-[#0F172A] font-bold">{new Date(incident.first_seen).toLocaleTimeString()}</span>
-          </div>
-          <div>
-            <span className="text-[10px] text-[#64748B] font-mono uppercase font-bold block">Spike Frequency</span>
+
+        <div className="flex items-center space-x-3">
+          <div className="bg-white border border-[#CBD5E1] rounded-xl px-3.5 py-2 flex items-center space-x-3 shadow-xs">
+            <span className="text-xs text-[#64748B] font-medium">Telemetry Volume</span>
             <span className="text-xs font-mono text-[#059669] font-bold">{incident.occurrence_count} events</span>
           </div>
           <button
@@ -205,28 +216,29 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
           <h3 className="text-xs font-mono font-bold tracking-wider text-[#0F172A] uppercase">
             Autonomous Self-Healing 8-Stage Pipeline Lifecycle
           </h3>
-          <span className="pill-blue font-bold">
-            STEP {currentStageIndex + 1} OF 8 COMPLETED
+          <span className={`pill-blue font-bold ${currentStageIndex === 7 ? 'bg-emerald-50 text-[#059669] border-emerald-300' : ''}`}>
+            {currentStageIndex === 7 ? 'ALL 8 OF 8 STEPS COMPLETED (AUTO-MERGED)' : `STEP ${currentStageIndex + 1} OF 8 COMPLETED`}
           </span>
         </div>
         
         <div className="relative pt-6 pb-2">
           <div className="absolute top-1/2 left-0 right-0 h-1.5 bg-[#E2E8F0] -translate-y-1/2 z-0 rounded-full" />
           <div 
-            className="absolute top-1/2 left-0 h-1.5 bg-[#4F46E5] -translate-y-1/2 z-0 transition-all duration-500 rounded-full" 
+            className="absolute top-1/2 left-0 h-1.5 bg-[#10B981] -translate-y-1/2 z-0 transition-all duration-500 rounded-full" 
             style={{ width: `${(Math.min(currentStageIndex, TIMELINE_STAGES.length - 1) / (TIMELINE_STAGES.length - 1)) * 100}%` }}
           />
 
           <div className="relative flex justify-between z-10 overflow-x-auto gap-2">
             {TIMELINE_STAGES.map((stObj, idx) => {
-              const isActive = idx === currentStageIndex;
-              const isCompleted = idx < currentStageIndex;
+              const isAllComplete = currentStageIndex === 7;
+              const isCompleted = idx < currentStageIndex || (isAllComplete && idx === 7);
+              const isActive = idx === currentStageIndex && !isAllComplete;
               
               let nodeColor = 'bg-[#F1F5F9] border-[#CBD5E1] text-[#94A3B8]';
-              if (isActive) {
+              if (isCompleted) {
+                nodeColor = 'bg-[#10B981] border-[#059669] text-white font-bold shadow-xs';
+              } else if (isActive) {
                 nodeColor = 'bg-[#4F46E5] border-[#4338CA] text-white shadow-md scale-110 font-bold';
-              } else if (isCompleted) {
-                nodeColor = 'bg-[#10B981] border-[#059669] text-white font-bold';
               }
 
               return (
@@ -234,7 +246,7 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
                   <div className={`h-9 w-9 rounded-full border-2 flex items-center justify-center font-mono text-xs transition-all duration-300 ${nodeColor}`}>
                     {isCompleted ? <CheckCircle2 className="h-5 w-5 text-white" /> : idx + 1}
                   </div>
-                  <span className={`text-[10px] font-mono font-bold tracking-tight mt-2.5 uppercase transition ${isActive ? 'text-[#4F46E5]' : isCompleted ? 'text-[#059669]' : 'text-[#94A3B8]'}`}>
+                  <span className={`text-[10px] font-mono font-bold tracking-tight mt-2.5 uppercase transition ${isCompleted ? 'text-[#059669]' : isActive ? 'text-[#4F46E5]' : 'text-[#94A3B8]'}`}>
                     {stObj.name}
                   </span>
                 </div>

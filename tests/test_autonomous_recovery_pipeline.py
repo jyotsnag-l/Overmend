@@ -69,7 +69,7 @@ async def seed_demo_organization_and_project() -> Tuple[models.Organization, mod
         else:
             project.repository = "demo-repo"
 
-        pol_res = await db.execute(select(models.ProjectPolicy).where(models.ProjectPolicy.project_id == "proj_123"))
+        pol_res = await db.execute(select(models.ProjectPolicy).where(models.ProjectPolicy.id == "pol_demo"))
         policy = pol_res.scalar_one_or_none()
         if not policy:
             policy = models.ProjectPolicy(
@@ -86,6 +86,7 @@ async def seed_demo_organization_and_project() -> Tuple[models.Organization, mod
             )
             db.add(policy)
         else:
+            policy.project_id = "proj_123"
             policy.auto_merge_threshold = 0.85
             policy.mandatory_review_threshold = 0.60
             policy.restricted_files = []

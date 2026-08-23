@@ -63,9 +63,10 @@ def monitor_pr_ci_task(self, incident_id: str, repo: str, pr_number: int):
         or repo.startswith("mock")
         or repo.startswith("demo")
         or repo.startswith("test")
-        or repo == "seed-org/seed-repo"
+        or repo in {"seed-org/seed-repo", "org/repo", "seed-org/payment-service"}
         or os.getenv("BYPASS_CELERY") == "true"
     )
+
 
     try:
         if is_mock_repo:

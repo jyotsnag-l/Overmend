@@ -66,9 +66,14 @@ if settings.GITHUB_PRIVATE_KEY and not os.path.isabs(settings.GITHUB_PRIVATE_KEY
         settings.GITHUB_PRIVATE_KEY = str(resolved_key_path)
         os.environ["GITHUB_PRIVATE_KEY"] = str(resolved_key_path)
 
-# Use SQLite for local development/testing when PostgreSQL is not available
+# Ensure postgresql connection string uses async driver
+if settings.DATABASE_URL.startswith("postgresql://"):
+    settings.DATABASE_URL = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+# Use SQLite for local development/testing when PostgreSQL is not explicitly configured or available
 if settings.ENVIRONMENT == "development":
     settings.DATABASE_URL = "sqlite+aiosqlite:///./test_recovery.db"
     settings.SYNC_DATABASE_URL = "sqlite:///./test_recovery.db"
+
 
 

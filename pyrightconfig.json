@@ -1,6 +1,8 @@
 {
   "extraPaths": [
     "apps/api",
+    "apps/recovery-worker",
+    "apps/github-worker",
     "packages/shared",
     "packages/core",
     "packages/github-client",

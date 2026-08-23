@@ -1,4 +1,26 @@
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const envApiUrl = import.meta.env.VITE_API_URL;
+
+function getApiUrl(): string {
+  if (envApiUrl && envApiUrl.trim()) {
+    return envApiUrl.trim();
+  }
+  if (typeof window !== 'undefined') {
+    const { hostname, port, origin } = window.location;
+    // When running locally on Vite dev server (e.g. port 3000, 5173)
+    if ((hostname === 'localhost' || hostname === '127.0.0.1') && port !== '8000') {
+      return 'http://localhost:8000';
+    }
+    // When deployed in production or served directly by FastAPI
+    if (origin && origin !== 'null') {
+      return origin;
+    }
+  }
+  return 'http://localhost:8000';
+}
+
+export const API_URL = getApiUrl();
+
+
 
 // Available simulated profiles for testing authorization policies
 export interface Profile {
@@ -218,6 +240,8 @@ export interface OrgAnalytics {
   mttr: number;
   mttd: number;
   incidents_over_time: { date: string; incidents: number; recovered: number }[];
+  hourly_decisions_24h?: { time: string; approved: number; human_review: number; rejected: number }[];
+  decisions_24h?: { approved: number; human_review: number; rejected: number; total: number };
   trust_distribution: { range: string; count: number }[];
   severity_distribution: Record<string, number>;
 }

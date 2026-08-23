@@ -7,8 +7,10 @@ import asyncio
 # Fix Windows console encoding if needed
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding='utf-8')  # type: ignore
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding='utf-8')  # type: ignore
     except Exception:
         pass
 
@@ -34,7 +36,7 @@ os.environ["BYPASS_CELERY"] = "true"
 os.environ["PATCH_PROVIDER"] = "mock"
 os.environ["GITHUB_MOCK"] = "true"
 if "DATABASE_URL" not in os.environ:
-    os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///recovery_test.db"
+    os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///test_recovery.db"
 
 class Colors:
     HEADER = '\033[95m'
@@ -121,13 +123,15 @@ async def seed_database_if_needed():
         else:
             project.repository = "demo-repo"
 
-        repo_res = await db.execute(select(models.Repository).where(models.Repository.project_id == "proj_123"))
+        repo_res = await db.execute(select(models.Repository).where(models.Repository.id == "repo_demo_1"))
         repo = repo_res.scalar_one_or_none()
         if not repo:
             repo = models.Repository(id="repo_demo_1", organization_id="org_demo", project_id="proj_123", name="demo-repo", url="https://github.com/demo-org/demo-repo")
             db.add(repo)
+        else:
+            repo.project_id = "proj_123"
 
-        pol_res = await db.execute(select(models.ProjectPolicy).where(models.ProjectPolicy.project_id == "proj_123"))
+        pol_res = await db.execute(select(models.ProjectPolicy).where(models.ProjectPolicy.id == "pol_demo"))
         policy = pol_res.scalar_one_or_none()
         if not policy:
             policy = models.ProjectPolicy(
@@ -216,7 +220,7 @@ def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
 
     # Step 3: Patch Generation
     t0 = time.perf_counter()
-    from tasks import generate_and_store_patches
+    from tasks import generate_and_store_patches  # type: ignore
     candidates = asyncio.run(generate_and_store_patches(incident_id, os.path.join(root_dir, "demo-repo"), fault))
     dur3 = (time.perf_counter() - t0) * 1000
     print(f"{Colors.BOLD}{Colors.GREEN}[3/8] STAGE 3: MULTI-CANDIDATE PATCH GENERATION{Colors.RESET} {Colors.DIM}({dur3:.1f}ms){Colors.RESET}")
@@ -228,7 +232,7 @@ def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
 
     # Step 4: Sandbox Execution
     t0 = time.perf_counter()
-    import tasks
+    import tasks  # type: ignore
     result = tasks.run_recovery_pipeline(incident_id, "demo-repo", scenario_data["stack_trace"])
     dur4 = (time.perf_counter() - t0) * 1000
 

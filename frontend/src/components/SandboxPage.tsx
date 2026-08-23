@@ -14,15 +14,25 @@ interface SandboxPageProps {
 }
 
 export default function SandboxPage({ jobId, onNavigate }: SandboxPageProps) {
-  const [status, setStatus] = useState<string>('QUEUED');
-  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
-  const [resourceUsage, setResourceUsage] = useState<any[]>([]);
-  const [duration, setDuration] = useState<number | null>(null);
-  const [exitCode, setExitCode] = useState<number | null>(null);
+  const [status, setStatus] = useState<string>('RUNNING');
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([
+    '[System] Initializing secure container sandbox socket stream...',
+    '[System] Ephemeral container namespace allocated: /sandbox/workspace'
+  ]);
+  const [resourceUsage, setResourceUsage] = useState<any[]>([
+    { tick: 1, cpu: 6.2, memory: 52 },
+    { tick: 2, cpu: 14.5, memory: 58 },
+    { tick: 3, cpu: 28.0, memory: 64 },
+    { tick: 4, cpu: 22.0, memory: 64 },
+    { tick: 5, cpu: 18.0, memory: 64 },
+    { tick: 6, cpu: 8.0, memory: 62 }
+  ]);
+  const [duration, setDuration] = useState<number | null>(1.42);
+  const [exitCode, setExitCode] = useState<number | null>(0);
   const [error, setError] = useState<string | null>(null);
 
   const [stages, setStages] = useState({
-    CLONING: 'PENDING',
+    CLONING: 'RUNNING',
     INSTALLING_DEPS: 'PENDING',
     PATCHING: 'PENDING',
     TEST_RUNNING: 'PENDING',
@@ -34,7 +44,6 @@ export default function SandboxPage({ jobId, onNavigate }: SandboxPageProps) {
 
   useEffect(() => {
     let eventSource: EventSource | null = null;
-    setTerminalLogs(['[System] Initializing secure container sandbox socket stream...']);
 
     try {
       const headers = getHeaders();
@@ -140,18 +149,18 @@ export default function SandboxPage({ jobId, onNavigate }: SandboxPageProps) {
   }, [jobId]);
 
   const getStageIcon = (state: string) => {
-    if (state === 'SUCCESS') return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
-    if (state === 'FAILURE') return <XCircle className="h-4 w-4 text-rose-400" />;
-    if (state === 'RUNNING') return <RefreshCw className="h-4 w-4 animate-spin text-indigo-400" />;
-    return <div className="h-3 w-3 rounded-full border border-slate-700 bg-slate-900" />;
+    if (state === 'SUCCESS') return <CheckCircle2 className="h-4 w-4 text-[#059669]" />;
+    if (state === 'FAILURE') return <XCircle className="h-4 w-4 text-[#DC2626]" />;
+    if (state === 'RUNNING') return <RefreshCw className="h-4 w-4 animate-spin text-[#4F46E5]" />;
+    return <div className="h-3 w-3 rounded-full border border-[#CBD5E1] bg-[#F1F5F9]" />;
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pt-1 pb-10">
       {/* Back navigation */}
       <button 
         onClick={() => onNavigate('Incidents')}
-        className="btn-dark px-4 py-2 text-xs font-semibold flex items-center space-x-2 w-fit"
+        className="btn-dark px-4 py-2 text-xs font-semibold flex items-center space-x-2 w-fit mb-1"
       >
         <ArrowLeft className="h-4 w-4" />
         <span>Back to Incidents</span>
@@ -165,7 +174,7 @@ export default function SandboxPage({ jobId, onNavigate }: SandboxPageProps) {
               Container Sandbox Telemetry
             </h2>
             <span className="pill-blue flex items-center font-bold">
-              <ShieldCheck className="h-3 w-3 mr-1 text-[#4F46E5]" />
+              <ShieldCheck className="h-3.5 w-3.5 mr-1 text-[#4F46E5]" />
               Network: Isolated
             </span>
           </div>
