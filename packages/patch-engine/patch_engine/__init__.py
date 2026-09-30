@@ -1,3 +1,4 @@
+import os
 import asyncio
 from .schemas import (
     PatchContext, IncidentData, FaultLocation, SourceContext,
@@ -5,15 +6,23 @@ from .schemas import (
     GitHistoryItem, HistoricalFix, CandidatePatchLLMOutput,
     LLMPatchesResponse, PatchValidationReport
 )
-from .providers import LLMProvider, OpenAIAdapter, AnthropicAdapter
+from .providers import (
+    LLMProvider, OpenAIAdapter, AnthropicAdapter, GeminiAdapter, GrokAdapter,
+    ProviderConfigurationError, get_provider
+)
 from .validator import validate_patch, apply_patch_to_text
-from .engine import PatchGenerationEngine, PatchCandidateResult
+from .engine import PatchGenerationEngine, PatchCandidateResult, normalize_diff
 
-def generate_patch(fault_info: dict) -> str:
+def generate_patch(fault_info: dict, repo_path: str = ".") -> str:
     """
-    Backward-compatible synchronous wrapper that generates a mock patch
-    for a localized fault.
+    Backward-compatible synchronous wrapper for patch generation.
+    Requires a configured real LLM provider (OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY).
+    Fails clearly if no real provider is configured.
     """
+    provider_name = os.getenv("PATCH_PROVIDER", "openai").lower().strip()
+    provider = get_provider(provider_name)
+
+
     incident = IncidentData(
         exception_type="ValueError",
         exception_message="Legacy fallback error",
@@ -32,28 +41,28 @@ def generate_patch(fault_info: dict) -> str:
         fault_location=fault_location,
         source_context=source_context
     )
-    
-    provider = OpenAIAdapter(api_key="mock")
+
     engine = PatchGenerationEngine(provider)
-    
+
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-    if loop.is_running():
-        # Fallback if loop is already running
-        import nest_asyncio
-        nest_asyncio.apply()
-        results = loop.run_until_complete(
-            engine.generate_candidates(context, repo_path=".", num_patches=1)
-        )
-    else:
-        results = loop.run_until_complete(
-            engine.generate_candidates(context, repo_path=".", num_patches=1)
-        )
-    
-    if results:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+            results = loop.run_until_complete(
+                engine.generate_candidates(context, repo_path=repo_path, num_patches=1)
+            )
+        else:
+            results = asyncio.run(
+                engine.generate_candidates(context, repo_path=repo_path, num_patches=1)
+            )
+    except Exception as e:
+        raise RuntimeError(f"Patch generation failed: {str(e)}")
+
+    if results and results[0].validation.is_valid:
         return results[0].candidate.unified_diff
-    return f"diff --git a/{fault_location.file} b/{fault_location.file}\n"
+    raise RuntimeError("No valid patch could be generated.")

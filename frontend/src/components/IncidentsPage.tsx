@@ -36,21 +36,14 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
   const handleInjectEvent = async () => {
     setInjecting(true);
     try {
-      const errorScenarios = [
-        { type: 'ZeroDivisionError', msg: 'division by zero in calculate_refund_rate()', file: 'payments/service.py', line: 184 },
-        { type: 'TypeError', msg: "unsupported operand type(s) for +: 'NoneType' and 'int'", file: 'analytics/counter.py', line: 28 },
-        { type: 'KeyError', msg: "'EXPIRED_CODE' in calculate_order_total()", file: 'orders.py', line: 14 },
-        { type: 'AttributeError', msg: "'NoneType' object has no attribute 'get_rate_limit'", file: 'gateway/rate_limiter.py', line: 92 }
-      ];
-      const pick = errorScenarios[Math.floor(Math.random() * errorScenarios.length)];
-      const inc = await triggerDemoIncident(pick.type, pick.msg, pick.file, pick.line);
+      const inc = await triggerDemoIncident();
       await loadIncidents();
       if (inc && inc.id) {
         onNavigate('IncidentDetail', { incidentId: inc.id });
       }
     } catch (err) {
-      console.error('Failed to inject demo incident', err);
-      setError('Failed to trigger demo incident');
+      console.error('Failed to inject real stock incident', err);
+      setError('Failed to trigger real stock incident');
     } finally {
       setInjecting(false);
     }
@@ -58,6 +51,8 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
 
   useEffect(() => {
     loadIncidents();
+    const poll = setInterval(loadIncidents, 3500);
+    return () => clearInterval(poll);
   }, []);
 
   const filteredIncidents = incidents.filter(inc => {
@@ -141,7 +136,7 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
             className="btn-periwinkle px-4 py-2 text-xs font-bold flex items-center space-x-2 shadow-sm disabled:opacity-50"
           >
             <Zap className={`h-3.5 w-3.5 ${injecting ? 'animate-spin' : ''}`} />
-            <span>{injecting ? 'Injecting Event...' : 'Inject Failure Event'}</span>
+            <span>{injecting ? 'Injecting Real Stock Failure...' : 'Inject Real Stock Failure'}</span>
           </button>
           <button 
             onClick={() => { setLoading(true); loadIncidents(); }}
@@ -299,7 +294,7 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
                       {inc.exception_type}
                     </td>
                     <td className="py-3.5 px-4 text-[#64748B] font-mono text-xs">
-                      {inc.affected_repository || 'seed-org/seed-repo'}
+                      {inc.affected_repository || 'recovery-test-repo'}
                     </td>
                     <td className="py-3.5 px-4">
                       {getSeverityBadge(inc.severity)}

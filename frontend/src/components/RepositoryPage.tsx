@@ -225,24 +225,44 @@ export default function RepositoryPage() {
                         : 'bg-white hover:bg-[#F8FAFC] border-[#E2E8F0] text-[#64748B]'
                     }`}
                   >
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-mono font-bold text-[#0F172A] truncate max-w-[170px]">{repo.name}</span>
-                      <span className="pill-mint font-bold flex items-center">
-                        <Heart className="h-2.5 w-2.5 text-[#059669] mr-1 animate-pulse" /> 98% Health
-                      </span>
-                    </div>
+                    {(() => {
+                      const health = typeof repo.health_percentage === 'number' ? repo.health_percentage : 100;
+                      const hasActive = (repo.active_incidents ?? 0) > 0;
+                      const isCritical = health < 60;
+                      return (
+                        <>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs font-mono font-bold text-[#0F172A] truncate max-w-[170px]">{repo.name}</span>
+                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center border ${
+                              health === 100
+                                ? 'bg-emerald-50 text-[#059669] border-emerald-200'
+                                : isCritical
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}>
+                              <Heart className={`h-2.5 w-2.5 mr-1 ${hasActive ? 'text-amber-500 animate-pulse' : 'text-[#059669]'}`} />
+                              {health}% Health
+                            </span>
+                          </div>
 
-                    <div className="flex items-center space-x-1.5 text-[10px] text-[#64748B] font-mono truncate">
-                      <Globe className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate">{repo.url}</span>
-                    </div>
-                    
-                    <div className="flex justify-between items-center text-[10px] font-mono text-[#64748B] pt-1.5 border-t border-[#E2E8F0]">
-                      <span className="flex items-center">
-                        <GitBranch className="h-3 w-3 mr-1 text-stone-400" /> main
-                      </span>
-                      <span className="text-[#059669] font-semibold">Self-Healing On</span>
-                    </div>
+                          <div className="flex items-center space-x-1.5 text-[10px] text-[#64748B] font-mono truncate">
+                            <Globe className="h-3 w-3 flex-shrink-0" />
+                            <span className="truncate">{repo.url}</span>
+                          </div>
+                          
+                          <div className="flex justify-between items-center text-[10px] font-mono text-[#64748B] pt-1.5 border-t border-[#E2E8F0]">
+                            <span className="flex items-center">
+                              <GitBranch className="h-3 w-3 mr-1 text-stone-400" /> main
+                            </span>
+                            <span className={hasActive ? 'text-amber-600 font-semibold' : 'text-[#059669] font-semibold'}>
+                              {hasActive 
+                                ? `${repo.active_incidents} Active Issue${(repo.active_incidents ?? 0) > 1 ? 's' : ''}` 
+                                : '100% Operational'}
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 );
               })

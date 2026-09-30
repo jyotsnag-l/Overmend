@@ -60,11 +60,9 @@ def monitor_pr_ci_task(self, incident_id: str, repo: str, pr_number: int):
     is_mock_repo = (
         client.mock
         or "/" not in repo
-        or repo.startswith("mock")
-        or repo.startswith("demo")
-        or repo.startswith("test")
-        or repo in {"seed-org/seed-repo", "org/repo", "seed-org/payment-service"}
-        or os.getenv("BYPASS_CELERY") == "true"
+        or repo.startswith(("mock", "org/", "test/", "dummy/"))
+        or repo in ["demo-repo", "owner/repo", "org/repo", "test/repo"]
+        or os.getenv("GITHUB_MOCK", "false").lower() == "true"
     )
 
 

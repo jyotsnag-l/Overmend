@@ -55,6 +55,12 @@ export default function ReviewQueuePage() {
     }
   };
 
+  useEffect(() => {
+    loadPendingIncidents();
+    const interval = setInterval(loadPendingIncidents, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
   const loadPatchDetail = async (incidentId: string) => {
     setLoadingPatch(true);
     try {
@@ -62,7 +68,7 @@ export default function ReviewQueuePage() {
         headers: {
           'X-User-ID': profile.id,
           'X-User-Email': profile.email,
-          'X-Organization-ID': localStorage.getItem('active_org_id') || 'org_seed'
+          'X-Organization-ID': localStorage.getItem('active_org_id') || 'org_overmend'
         }
       });
       const incDetail = await res.json();
@@ -260,7 +266,7 @@ export default function ReviewQueuePage() {
                     </div>
                     <p className="text-xs text-[#64748B] truncate font-sans">{inc.exception_message}</p>
                     <div className="flex justify-between items-center text-[10px] font-mono text-[#64748B] pt-1 border-t border-[#E2E8F0]">
-                      <span>{inc.affected_repository || 'seed-org/repo'}</span>
+                      <span>{inc.affected_repository || 'recovery-test-repo'}</span>
                       <span className="pill-peach font-bold">
                         {inc.status}
                       </span>

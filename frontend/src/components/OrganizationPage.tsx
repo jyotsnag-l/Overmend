@@ -52,7 +52,7 @@ export default function OrganizationPage() {
 
   const projectStats: Record<string, { total: number; recovered: number }> = {};
   incidents.forEach(inc => {
-    const projName = inc.affected_project || inc.affected_repository || 'seed-microservice';
+    const projName = inc.affected_project || inc.affected_repository || 'recovery-service';
     if (!projectStats[projName]) {
       projectStats[projName] = { total: 0, recovered: 0 };
     }
@@ -87,7 +87,7 @@ export default function OrganizationPage() {
               Organization & Analytics
             </h2>
             <span className="pill-blue font-bold">
-              org_seed (Active Org)
+              Overmend AI (Active Org)
             </span>
           </div>
           <p className="text-xs text-[#64748B] mt-1 font-sans">

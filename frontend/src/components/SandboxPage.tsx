@@ -40,7 +40,7 @@ export default function SandboxPage({ jobId, onNavigate }: SandboxPageProps) {
   });
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const orgId = localStorage.getItem('active_org_id') || 'org_seed';
+  const orgId = localStorage.getItem('active_org_id') || 'org_overmend';
 
   useEffect(() => {
     let eventSource: EventSource | null = null;

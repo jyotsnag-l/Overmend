@@ -171,12 +171,12 @@ class GitHubAppClient:
             return [
                 {
                     "id": 101,
-                    "name": "demo-repo",
-                    "full_name": "seed-org/demo-repo",
+                    "name": "recovery-test-repo",
+                    "full_name": "jyotsnag-l/recovery-test-repo",
                     "private": False,
-                    "html_url": "https://github.com/seed-org/demo-repo",
+                    "html_url": "https://github.com/jyotsnag-l/recovery-test-repo",
                     "default_branch": "main",
-                    "description": "Mock repository for local verification"
+                    "description": "Autonomous self-healing test repository"
                 }
             ]
         url = "https://api.github.com/installation/repositories"
@@ -354,10 +354,7 @@ class GitHubAppClient:
             self.mock
             or "/" not in repo
             or repo.startswith("mock")
-            or repo.startswith("demo")
-            or repo.startswith("test")
-            or repo == "seed-org/seed-repo"
-            or os.getenv("BYPASS_CELERY") == "true"
+            or os.getenv("GITHUB_MOCK", "false").lower() == "true"
         ):
             return True
         url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/merge"

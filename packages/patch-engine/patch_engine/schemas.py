@@ -104,6 +104,8 @@ class CandidatePatchLLMOutput(BaseModel):
     affected_files: List[str] = Field(..., description="List of file paths modified by this patch")
     estimated_change_scope: str = Field(..., description="Description of the size and impact of the patch (e.g. 'SMALL', 'MEDIUM', 'LARGE')")
     reasoning_summary: str = Field(..., description="A short summary of the reasoning behind this fix")
+    is_duplicate: Optional[bool] = Field(default=False, description="Whether this patch was identified as a duplicate")
+    duplicate_of: Optional[str] = Field(default=None, description="The patch_id of the original candidate if duplicate")
 
 class LLMPatchesResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -111,8 +113,12 @@ class LLMPatchesResponse(BaseModel):
     patches: List[CandidatePatchLLMOutput] = Field(..., description="List of generated candidate patches, exactly 3 by default")
 
 class PatchValidationReport(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
     is_valid: bool
     error_reason: Optional[str] = None
     patch_size: int = 0  # lines changed (additions + deletions)
     files_changed: int = 0
     affected_paths: List[str] = Field(default_factory=list)
+    hunks_matched: Optional[bool] = Field(default=None, description="Whether all diff hunks matched repository source")
+    syntax_valid: Optional[bool] = Field(default=None, description="Whether patched code passed syntax/AST validation")

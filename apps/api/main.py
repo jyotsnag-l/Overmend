@@ -59,14 +59,6 @@ async def lifespan(app: FastAPI):
                     # Column likely already exists or table does not support it
                     logger.debug(f"Column {column} check: {ex}")
         logger.info("Database tables verified/created successfully.")
-        
-        # Auto-seed database with rich demo incidents
-        try:
-            from seed_dashboard import seed_dashboard_data
-            await seed_dashboard_data()
-            logger.info("Database auto-seeded successfully with demo incidents.")
-        except Exception as seed_err:
-            logger.warning(f"Auto-seed skipped/error: {seed_err}")
     except Exception as e:
         logger.error(f"Error initializing database tables: {e}", exc_info=True)
     yield

@@ -2,9 +2,12 @@ import os
 import uuid
 from typing import Dict, Any, Optional, Callable
 from .runner import SandboxConfig, SandboxRunner
+from .models import SandboxResult, SandboxStatus
+from .parser import TestOutputParser
+from .resolvers import TestCommandResolver, EcosystemAdapter, PythonAdapter
 from .storage import upload_artifact
 
-def run_in_sandbox(patch: str, test_cmd: str, repo_url: Optional[str] = None, commit_hash: Optional[str] = None) -> Dict[str, Any]:
+def run_in_sandbox(patch: str, test_cmd: str, repo_url: Optional[str] = None, commit_hash: Optional[str] = None) -> SandboxResult:
     """
     Backward-compatible helper function to run a patch in a sandbox container.
     """
@@ -22,3 +25,16 @@ def run_in_sandbox(patch: str, test_cmd: str, repo_url: Optional[str] = None, co
     runner = SandboxRunner(config)
     job_id = f"compat_{uuid.uuid4().hex[:8]}"
     return runner.run(job_id, repo_url, commit_hash, patch)
+
+__all__ = [
+    "SandboxConfig",
+    "SandboxRunner",
+    "SandboxResult",
+    "SandboxStatus",
+    "TestOutputParser",
+    "TestCommandResolver",
+    "EcosystemAdapter",
+    "PythonAdapter",
+    "upload_artifact",
+    "run_in_sandbox",
+]

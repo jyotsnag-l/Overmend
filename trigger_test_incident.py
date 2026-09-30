@@ -3,13 +3,13 @@ import json
 
 def trigger_incident():
     url = "http://localhost:8000/api/v1/events"
-    project_id = "proj_seed"
+    project_id = "proj_feb51039"
     
     headers = {
         "X-Project-ID": project_id,
-        "X-User-ID": "usr_seed",
-        "X-User-Email": "seed_user@example.com",
-        "X-Organization-ID": "org_seed",
+        "X-User-ID": "usr_jyotsna",
+        "X-User-Email": "jyotsnag.amcec@gmail.com",
+        "X-Organization-ID": "org_overmend",
         "Content-Type": "application/json"
     }
     
@@ -17,8 +17,8 @@ def trigger_incident():
     try:
         httpx.post("http://localhost:8000/api/v1/projects", json={
             "id": project_id,
-            "name": "API Gateway & Core Services",
-            "repository": "seed-org/seed-repo"
+            "name": "recovery-test-repo",
+            "repository": "jyotsnag-l/recovery-test-repo"
         }, headers=headers, timeout=5.0)
     except Exception:
         pass
@@ -33,8 +33,8 @@ def trigger_incident():
 TypeError: Cannot read properties of undefined (reading 'layer_data')""",
         "environment": "production",
         "context": {
-            "module": "osi-tcp-simulator",
-            "repository": "seed-org/seed-repo"
+            "module": "recovery-pipeline",
+            "repository": "jyotsnag-l/recovery-test-repo"
         }
     }
     

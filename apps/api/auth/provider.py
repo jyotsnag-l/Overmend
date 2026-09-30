@@ -39,9 +39,9 @@ class HeaderAuthProvider(AuthProvider):
         A simple replaceable provider that extracts user info from headers.
         Useful for local dev, testing, or gateway-delegated auth.
         """
-        user_id = request.headers.get("X-User-ID")
-        email = request.headers.get("X-User-Email")
-        name = request.headers.get("X-User-Name", "Default User")
+        user_id = request.headers.get("X-User-ID") or request.query_params.get("user_id")
+        email = request.headers.get("X-User-Email") or request.query_params.get("user_email")
+        name = request.headers.get("X-User-Name") or request.query_params.get("user_name", "Default User")
 
         if not email:
             # Fall back to Authorization header format if present (e.g. Bearer test_user@org.com)

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 # Organization Schemas
 class OrganizationBase(BaseModel):
@@ -58,6 +58,7 @@ class IncidentBase(BaseModel):
     exception_message: str = Field(..., description="The message detailing the exception")
     stack_trace: str = Field(..., description="The full traceback of the exception")
     context: Dict[str, Any] = Field(default_factory=dict, description="Additional contextual info")
+    commit_sha: Optional[str] = Field(default=None, description="The Git commit hash where exception occurred")
 
 class IncidentCreate(IncidentBase):
     project_id: str = Field(..., description="ID of the project reporting this exception")
@@ -92,10 +93,20 @@ class EventCreate(BaseModel):
     line: Optional[int] = Field(default=None, description="The line number where exception occurred")
     function: Optional[str] = Field(default=None, description="The function name where exception occurred")
     git_commit: Optional[str] = Field(default=None, description="The Git commit hash")
+    commit_sha: Optional[str] = Field(default=None, description="The Git commit hash (alias for git_commit)")
     runtime_metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata about the runtime environment")
     environment: str = Field(default="production", description="The environment e.g. production, staging, development")
     request_metadata: Optional[Dict[str, Any]] = Field(default=None, description="Safe HTTP request metadata")
     sdk_version: Dict[str, Any] = Field(default_factory=dict, description="SDK version metadata")
+
+    @model_validator(mode="after")
+    def sync_commit_sha(self):
+        sha = self.commit_sha or self.git_commit
+        if sha:
+            self.commit_sha = sha
+            self.git_commit = sha
+        return self
+
 
 # Patch & Decision Schemas
 class PatchCandidateResponse(BaseModel):

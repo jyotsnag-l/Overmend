@@ -98,7 +98,7 @@ def evaluate_patch(
         # 2. Apply Unified Diff Patch
         patch_applied = _apply_patch(temp_repo_dir, patch_diff)
         if not patch_applied:
-            is_simulated = any(k in repository.lower() for k in ["seed-org", "demo", "mock", "test", "example"]) or os.getenv("GITHUB_MOCK", "false").lower() == "true"
+            is_simulated = os.getenv("GITHUB_MOCK", "false").lower() == "true" or "mock" in repository.lower()
             if is_simulated:
                 logger.info("Using simulated high-confidence trust evaluation for demo repository")
                 return {

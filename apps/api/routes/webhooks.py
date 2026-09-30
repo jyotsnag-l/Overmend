@@ -76,7 +76,7 @@ async def github_webhook(
         # Default organization context
         res = await db.execute(select(models.Organization).limit(1))
         org = res.scalar_one_or_none()
-        org_id = org.id if org else "org_seed"
+        org_id = org.id if org else "org_overmend"
 
         if action in ("added", "created") or repos_added:
             for repo in repos_added:

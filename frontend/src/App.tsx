@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { 
-  Shield, Activity, AlertTriangle, AlertCircle, LayoutDashboard, 
+  Activity, AlertTriangle, AlertCircle, LayoutDashboard, 
   ShieldCheck, Settings2, BarChart2, GitFork, PlaySquare,
-  Lock, Check, X, Info
+  Lock, Check, X, Sparkles
 } from 'lucide-react';
 
 // API & Components Imports
@@ -12,6 +12,7 @@ import {
 import { 
   ROLE_CONFIGS, canTriggerIncidents, UserRole, PERMISSION_MATRIX 
 } from './permissions';
+import LandingPage from './components/LandingPage';
 import DashboardPage from './components/DashboardPage';
 import IncidentsPage from './components/IncidentsPage';
 import IncidentDetailPage from './components/IncidentDetailPage';
@@ -24,8 +25,8 @@ import ReviewQueuePage from './components/ReviewQueuePage';
 import OrganizationPage from './components/OrganizationPage';
 
 export default function App() {
-  // Routing & navigation state
-  const [currentPage, setCurrentPage] = useState<string>('Dashboard');
+  // Routing & navigation state - Landing page is the first page seen
+  const [currentPage, setCurrentPage] = useState<string>('Landing');
   const [pageParams, setPageParams] = useState<Record<string, any>>({});
 
   // Telemetry Health state
@@ -80,13 +81,8 @@ export default function App() {
     if (!userCanTrigger) return;
     setTriggering(true);
     try {
-      await triggerDemoIncident(
-        'KeyError',
-        'stripe_signature header missing in webhook',
-        'auth/verification.py',
-        42
-      );
-      setTriggerSuccess('Simulated KeyError incident ingested! Self-healing pipeline enqueued.');
+      await triggerDemoIncident();
+      setTriggerSuccess('Real Stock Availability incident ingested for jyotsnag-l/recovery-test-repo! Autonomous recovery pipeline enqueued.');
       fetchSystemHealth();
       setCurrentPage('Incidents');
       setTimeout(() => setTriggerSuccess(null), 5000);
@@ -106,6 +102,8 @@ export default function App() {
 
   const renderPage = () => {
     switch (currentPage) {
+      case 'Landing':
+        return <LandingPage onNavigate={handleNavigate} health={health} />;
       case 'Dashboard':
         return <DashboardPage onNavigate={handleNavigate} />;
       case 'Incidents':
@@ -133,17 +131,18 @@ export default function App() {
       case 'ReviewQueue':
         return <ReviewQueuePage />;
       default:
-        return <DashboardPage onNavigate={handleNavigate} />;
+        return <LandingPage onNavigate={handleNavigate} health={health} />;
     }
   };
 
   const menuItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, badge: null },
-    { name: 'Incidents', icon: AlertCircle, badge: null },
-    { name: 'Review Queue', icon: ShieldCheck, badge: 'Live' },
-    { name: 'Repository', icon: GitFork, badge: null },
-    { name: 'Organization', icon: BarChart2, badge: null },
-    { name: 'Settings', icon: Settings2, badge: null }
+    { name: 'Landing', label: 'Overview', icon: Sparkles, badge: 'Home' },
+    { name: 'Dashboard', label: 'Dashboard', icon: LayoutDashboard, badge: null },
+    { name: 'Incidents', label: 'Incidents', icon: AlertCircle, badge: null },
+    { name: 'Review Queue', label: 'Review Queue', icon: ShieldCheck, badge: 'Live' },
+    { name: 'Repository', label: 'Repository', icon: GitFork, badge: null },
+    { name: 'Organization', label: 'Organization', icon: BarChart2, badge: null },
+    { name: 'Settings', label: 'Settings', icon: Settings2, badge: null }
   ];
 
   return (
@@ -152,7 +151,7 @@ export default function App() {
       <header className="bg-white border-b border-[#E2E8F0] sticky top-0 z-40 px-8 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         {/* Brand & Search Bar */}
         <div className="flex items-center space-x-8">
-          <div className="flex items-center space-x-3.5 cursor-pointer" onClick={() => handleNavigate('Dashboard')}>
+          <div className="flex items-center space-x-3.5 cursor-pointer" onClick={() => handleNavigate('Landing')}>
             <div className="flex items-center justify-center h-11 w-11 rounded-2xl bg-[#EEF2FF] border border-[#C7D2FE] shadow-xs">
               <img src="/overmend_logo.svg" alt="Overmend Logo" className="h-6 w-6" />
             </div>
@@ -255,7 +254,7 @@ export default function App() {
                     >
                       <div className="flex items-center space-x-3.5">
                         <Icon className={`h-5 w-5 ${isActive ? 'text-white' : 'text-[#64748B]'}`} />
-                        <span>{item.name}</span>
+                        <span>{item.label || item.name}</span>
                       </div>
                       {item.badge && (
                         <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0] font-bold">
@@ -285,13 +284,13 @@ export default function App() {
           <div className="pt-4 border-t border-[#E2E8F0] text-xs font-mono text-[#64748B] space-y-1.5 px-2">
             <div className="flex justify-between">
               <span>Organization:</span>
-              <span className="text-[#0F172A] font-bold">org_seed</span>
+              <span className="text-[#0F172A] font-bold">Overmend AI</span>
             </div>
             <div className="flex justify-between">
               <span>Recovery Engine:</span>
               <span className="text-[#059669] font-bold flex items-center">
                 <span className="h-2 w-2 rounded-full bg-[#059669] mr-1.5" />
-                Active
+                Active (Realtime)
               </span>
             </div>
           </div>

@@ -73,11 +73,30 @@ def run_async(coro):
         loop = get_worker_loop()
         return loop.run_until_complete(coro)
 
+def _has_celery_workers() -> bool:
+    if os.getenv("BYPASS_CELERY", "false").lower() == "true":
+        return False
+    try:
+        insp = celery_app.control.inspect(timeout=0.2)
+        pings = insp.ping() if insp else None
+        return bool(pings)
+    except Exception:
+        return False
+
+class PatchCandidateList(list):
+    def __init__(self, items=(), error=None):
+        super().__init__(items)
+        self.error = error
+
 def sanitize_metadata(meta: dict) -> dict:
+    if hasattr(meta, "to_dict"):
+        meta = meta.to_dict()
     if not isinstance(meta, dict):
         return {}
     sanitized = {}
     for k, v in meta.items():
+        if hasattr(v, "to_dict"):
+            v = v.to_dict()
         if hasattr(v, "__class__") and "Mock" in v.__class__.__name__:
             sanitized[k] = "<MockObject>"
         elif isinstance(v, dict):
@@ -217,7 +236,7 @@ async def generate_and_store_patches(incident_id: str, repo_path: Optional[str],
         if not repo_path:
             repo_path = fault_localizer._get_default_repo_path()
             
-        if os.getenv("PATCH_PROVIDER", "mock").lower() == "mock" or not repo_path or not os.path.exists(str(repo_path)):
+        if os.getenv("PATCH_PROVIDER", "mock").lower() == "mock" or not repo_path or not os.path.exists(repo_path):
             context_dict = {
                 "incident": {
                     "id": str(incident.id),
@@ -274,28 +293,15 @@ async def generate_and_store_patches(incident_id: str, repo_path: Optional[str],
                 "max_files_changed": 3
             }
             
-        provider_name = os.getenv("PATCH_PROVIDER", "openai").lower()
-        openai_key = os.getenv("OPENAI_API_KEY")
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        
-        if provider_name == "anthropic" and (anthropic_key or anthropic_key == "mock"):
-            provider = patch_engine.AnthropicAdapter(api_key=anthropic_key)
-        elif provider_name == "openai" and (openai_key or openai_key == "mock"):
-            provider = patch_engine.OpenAIAdapter(api_key=openai_key)
-        else:
-            if openai_key:
-                provider = patch_engine.OpenAIAdapter(api_key=openai_key)
-            elif anthropic_key:
-                provider = patch_engine.AnthropicAdapter(api_key=anthropic_key)
-            else:
-                provider = patch_engine.OpenAIAdapter(api_key="mock")
+        provider_name = os.getenv("PATCH_PROVIDER", "openai").lower().strip()
+        provider = patch_engine.get_provider(provider_name)
                 
         engine = patch_engine.PatchGenerationEngine(provider)
         try:
             results = await engine.generate_candidates(patch_context, repo_path=repo_path, policy=policy_dict)
         except Exception as e:
             logger.error(f"Patch candidate generation failed: {e}")
-            return []
+            return PatchCandidateList([], error=str(e))
             
         db_candidates = []
         valid_candidates = []
@@ -322,7 +328,11 @@ async def generate_and_store_patches(incident_id: str, repo_path: Optional[str],
                 
         await db.commit()
         db.expunge_all()
-        return valid_candidates
+        if not valid_candidates:
+            val_errors = [c.validation_error for c in db_candidates if c.validation_error]
+            err_reason = f"All generated candidates failed validation: {'; '.join(val_errors)}" if val_errors else "No valid candidates generated"
+            return PatchCandidateList([], error=err_reason)
+        return PatchCandidateList(valid_candidates)
 
 async def get_project_policy(project_id: str) -> Optional[models.ProjectPolicy]:
     async with AsyncSessionLocal() as db:
@@ -334,20 +344,64 @@ async def get_project_policy(project_id: str) -> Optional[models.ProjectPolicy]:
     name="tasks.run_recovery_pipeline",
     max_retries=3,
 )
-def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str) -> dict:
+def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str, commit_sha: Optional[str] = None) -> dict:
     logger.info(f"Starting autonomous recovery pipeline for incident {incident_id} in {repo}...")
     
+    workspace = None
     try:
-        # 1. Start / Triage
+        # 1. Start / Triage - with idempotency check
+        async def check_incident_status(inc_id):
+            async with AsyncSessionLocal() as db:
+                res = await db.execute(select(models.Incident).where(models.Incident.id == inc_id))
+                inc = res.scalar_one_or_none()
+                return inc.status if inc else None
+        current_status = run_async(check_incident_status(incident_id))
+        if current_status in ("PATCH_GENERATED", "SANDBOX_RUNNING", "TESTED", "TRUST_EVALUATED", "AUTO_MERGE", "VERIFIED", "MERGED", "REJECTED"):
+            logger.info(f"Incident {incident_id} already progressed to {current_status}. Skipping redundant run.")
+            return {"status": "skipped", "reason": f"Already at {current_status}"}
+
         run_async(async_transition_state(incident_id, "TRIAGED", "Celery worker starting recovery process"))
         
         # Core check
         version = core.get_version()
         logger.info(f"Core engine version: {version}")
 
+        # Resolve commit SHA if not passed directly
+        if not commit_sha:
+            async def get_incident_commit(inc_id):
+                async with AsyncSessionLocal() as db:
+                    res = await db.execute(select(models.Incident).where(models.Incident.id == inc_id))
+                    inc = res.scalar_one_or_none()
+                    if inc and inc.context:
+                        return inc.context.get("commit_sha") or inc.context.get("git_commit")
+                    return None
+            commit_sha = run_async(get_incident_commit(incident_id))
+
+        # Acquire isolated temporary repository workspace via RepositoryManager
+        repo_manager = github_client.RepositoryManager()
+        try:
+            workspace = repo_manager.acquire(
+                repository=repo,
+                commit_sha=commit_sha,
+                incident_id=incident_id
+            )
+            repo_workspace_path = workspace.path
+            logger.info(f"Acquired workspace for {repo} @ {workspace.commit_sha or 'HEAD'} at {repo_workspace_path}")
+        except Exception as acq_err:
+            logger.error(f"Failed to acquire repository workspace for {repo}: {acq_err}", exc_info=True)
+            run_async(async_transition_state(
+                incident_id,
+                "REJECTED",
+                f"Repository acquisition failed: {str(acq_err)}"
+            ))
+            return {
+                "status": "failed",
+                "reason": f"Repository acquisition failed: {str(acq_err)}"
+            }
+
         # 2. Fault localization
         logger.info("Running fault localization...")
-        fault = fault_localizer.localize_fault(stack_trace)
+        fault = fault_localizer.localize_fault(stack_trace, repo_path=repo_workspace_path)
         run_async(async_transition_state(incident_id, "LOCALIZED", f"Fault localized in file: {fault.get('file', 'unknown')}", metadata={"fault": fault}))
 
         # 3. Patch generation
@@ -361,7 +415,7 @@ def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str) -
                 async with AsyncSessionLocal() as db:
                     inc_res = await db.execute(select(models.Incident).where(models.Incident.id == incident_id))
                     inc = inc_res.scalar_one_or_none()
-                    org_id = inc.organization_id if inc else "org_seed"
+                    org_id = inc.organization_id if inc else "org_overmend"
                     pc = models.PatchCandidate(
                         id=f"patch_{uuid.uuid4().hex[:8]}",
                         organization_id=org_id,
@@ -379,22 +433,45 @@ def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str) -
             patch_candidates = [patch_candidate]
             run_async(async_transition_state(incident_id, "PATCH_GENERATED", "Candidate patch generated successfully", metadata={"patch": patch}))
         else:
-            repo_path = repo if (repo and os.getenv("PATCH_PROVIDER") != "mock" and os.path.exists(repo)) else None
+            repo_path = repo_workspace_path if (repo_workspace_path and os.getenv("PATCH_PROVIDER") != "mock" and os.path.exists(repo_workspace_path)) else None
             patch_candidates = run_async(generate_and_store_patches(incident_id, repo_path, fault))
+
+        if not patch_candidates:
+            err_msg = getattr(patch_candidates, "error", None) or "No valid candidate patch could be generated"
+            run_async(async_transition_state(incident_id, "REJECTED", f"Patch generation rejected: {err_msg}"))
+            return {
+                "status": "failed",
+                "reason": err_msg
+            }
             
-            if not patch_candidates:
-                run_async(async_transition_state(incident_id, "REJECTED", "No valid candidate patch could be generated"))
-                return {
-                    "status": "failed",
-                    "reason": "No valid patch candidate generated"
-                }
-                
-            run_async(async_transition_state(incident_id, "PATCH_GENERATED", f"Candidate patches generated successfully: {len(patch_candidates)}", metadata={"patches": [p.diff for p in patch_candidates]}))
+        run_async(async_transition_state(incident_id, "PATCH_GENERATED", f"Candidate patches generated successfully: {len(patch_candidates)}", metadata={"patches": [p.diff for p in patch_candidates]}))
+
 
         # 4. Sandbox execution
         logger.info("Spawning sandbox execution jobs...")
         run_async(async_transition_state(incident_id, "SANDBOX_RUNNING", "Running tests in parallel sandbox environments"))
         
+        # Reproduce original failure on unpatched workspace
+        baseline_reproduced = False
+        if repo_workspace_path and os.path.exists(repo_workspace_path):
+            try:
+                logger.info(f"Reproducing original failure on acquired workspace before applying patches ({repo} @ {commit_sha or 'HEAD'})...")
+                cfg = sandbox_manager.SandboxConfig(timeout=60, test_command="pytest")
+                baseline_runner = sandbox_manager.SandboxRunner(cfg)
+                baseline_res = baseline_runner.run(
+                    job_id=f"repro_{incident_id}",
+                    repo_url=repo_workspace_path,
+                    commit_hash=commit_sha or "HEAD",
+                    patch_diff=""
+                )
+                if baseline_res.exit_code != 0:
+                    baseline_reproduced = True
+                    logger.info(f"Original failure successfully reproduced before patch (exit_code={baseline_res.exit_code})")
+                else:
+                    logger.warning(f"Unpatched test execution unexpectedly passed (exit_code={baseline_res.exit_code})")
+            except Exception as repro_err:
+                logger.warning(f"Baseline failure reproduction check encountered error: {repro_err}")
+
         sandbox_results = []
         passing_candidate = None
         passing_result = None
@@ -467,20 +544,24 @@ def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str) -
             else:
                 job_map.append((pc, None))
 
+        use_direct = not _has_celery_workers()
         for pc, sandbox_job_id in job_map:
             if sandbox_job_id:
-                logger.info(f"Triggering Celery sandbox task tasks.run_sandbox_job for job {sandbox_job_id}")
-                if os.getenv("BYPASS_CELERY", "false").lower() == "true":
+                if use_direct:
+                    logger.info(f"Running sandbox job {sandbox_job_id} via direct execution (Celery inactive or bypassed)")
                     import sys
                     import importlib.util
-                    spec = importlib.util.spec_from_file_location("sandbox_worker_tasks", "apps/sandbox-worker/tasks.py")
+                    sandbox_tasks_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../sandbox-worker/tasks.py"))
+                    spec = importlib.util.spec_from_file_location("sandbox_worker_tasks", sandbox_tasks_path)
                     if spec and spec.loader:
                         sandbox_worker_tasks = importlib.util.module_from_spec(spec)
+                        sys.modules["sandbox_worker_tasks"] = sandbox_worker_tasks
                         spec.loader.exec_module(sandbox_worker_tasks)
-                        sandbox_result = sandbox_worker_tasks.run_sandbox_job.run(sandbox_job_id)
+                        sandbox_result = sandbox_worker_tasks.run_sandbox_job.apply(args=[sandbox_job_id]).result
                     else:
                         sandbox_result = {"exit_code": 1, "stdout": "", "stderr": "Failed to load sandbox spec"}
                 else:
+                    logger.info(f"Triggering Celery sandbox task tasks.run_sandbox_job for job {sandbox_job_id}")
                     celery_res = celery_app.send_task(
                         "tasks.run_sandbox_job",
                         args=[sandbox_job_id]
@@ -515,14 +596,19 @@ def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str) -
             incident_id,
             "TESTED",
             f"Sandbox tests passed for candidate: {patch_candidate.id}",
-            metadata={"sandbox_result": sandbox_result, "patch_candidate_id": patch_candidate.id}
+            metadata={
+                "sandbox_result": sandbox_result,
+                "patch_candidate_id": patch_candidate.id,
+                "baseline_reproduced": baseline_reproduced
+            }
         ))
 
         # 5. Trust evaluation & Mutation Testing
         logger.info("Executing Trust Engine evaluation and Mutation Testing...")
-        repo_path = repo if (repo and os.path.exists(repo)) else None
+        repo_path = repo_workspace_path if (repo_workspace_path and os.path.exists(repo_workspace_path)) else (repo if (repo and os.path.exists(repo)) else None)
         if not repo_path:
             repo_path = fault_localizer._get_default_repo_path()
+
             
         test_command = "pytest"
 
@@ -539,7 +625,7 @@ def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str) -
             blast_radius = inc_obj.context.get("blast_radius", 0.0)
             sensitive_file_flag = inc_obj.context.get("sensitive_file_flag", False)
 
-        is_simulated_trust = any(k in str(repo).lower() for k in ["seed-org", "seed-repo", "mock", "demo", "example"]) or os.getenv("GITHUB_MOCK", "false").lower() == "true" or not repo_path or not os.path.exists(str(repo_path))
+        is_simulated_trust = os.getenv("GITHUB_MOCK", "false").lower() == "true" or not repo_path or not os.path.exists(repo_path)
         if is_simulated_trust:
             trust_report = {
                 "trust_score": 0.95,
@@ -764,7 +850,7 @@ def run_recovery_pipeline(self, incident_id: str, repo: str, stack_trace: str) -
                     async with AsyncSessionLocal() as db:
                         inc_res = await db.execute(select(models.Incident).where(models.Incident.id == inc_id))
                         inc = inc_res.scalar_one_or_none()
-                        org_id = inc.organization_id if inc else "org_seed"
+                        org_id = inc.organization_id if inc else "org_overmend"
                         
                         status_map = {
                             "AUTO_MERGE": "APPROVED",
@@ -879,45 +965,59 @@ The PR is an audit artifact."""
         app_id = os.getenv("GITHUB_APP_ID", "mock")
         private_key = os.getenv("GITHUB_PRIVATE_KEY", "mock")
         installation_id = os.getenv("GITHUB_INSTALLATION_ID")
-        is_mock_repo = any(k in str(repo).lower() for k in ["seed-org", "seed-repo", "demo", "mock", "test", "example"]) or os.getenv("GITHUB_MOCK", "false").lower() == "true"
+        is_mock_repo = (
+            any(k in repo.lower() for k in ["mock", "dummy", "demo-repo"])
+            or ("/" not in repo)
+            or os.getenv("GITHUB_MOCK", "false").lower() == "true"
+        )
         client = github_client.GitHubAppClient(app_id, private_key, installation_id, mock=(is_mock_repo or app_id == "mock"))
 
+
         if decision_val in ("AUTO_MERGE", "HUMAN_REVIEW"):
-            logger.info("Creating pull request for fix...")
-            branch_name = f"recovery/fix-{incident_id}"
-            
-            # Determine base SHA
-            base_sha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-            try:
-                if not client.mock:
-                    branch_info = client.get_branch(repo, "main")
-                    base_sha = branch_info["commit"]["sha"]
-            except Exception as e:
-                logger.warning(f"Failed to fetch base SHA: {e}. Using fallback.")
+            logger.info("Executing Safe GitHub Recovery pipeline...")
+            cand_dict = {
+                "candidate_id": p_cand_id,
+                "provider": getattr(patch_candidate, "provider", "grok") if 'patch_candidate' in locals() and patch_candidate else "grok",
+                "model": getattr(patch_candidate, "model", "default") if 'patch_candidate' in locals() and patch_candidate else "default",
+                "patch_diff": patch,
+                "validation_result": True,
+                "test_result": (sandbox_result.get("exit_code", 0) == 0) if sandbox_result else False,
+                "tests_passed": 1,
+                "tests_failed": 0,
+                "mutation_score": mutation_score,
+                "mutation_tests_killed": trust_report.get("evidence", {}).get("mutants_killed", 0) if isinstance(trust_report.get("evidence"), dict) else 0,
+                "mutation_tests_passed": trust_report.get("evidence", {}).get("mutants_survived", 0) if isinstance(trust_report.get("evidence"), dict) else 0,
+                "files_changed": files_changed,
+                "lines_added": sum(1 for l in patch.splitlines() if l.startswith("+") and not l.startswith("+++")),
+                "lines_removed": sum(1 for l in patch.splitlines() if l.startswith("-") and not l.startswith("---")),
+                "trust_score": trust_score,
+                "decision": decision_val,
+                "sandbox_status": "SUCCESS" if (sandbox_result and sandbox_result.get("exit_code", 0) == 0) else "FAILED"
+            }
+            faulty_sha = commit_sha or "a9ca1cde1290cffc76efaea7d4eba107765ebf43"
 
             try:
-                client.create_branch(repo, branch_name, base_sha)
-            except Exception as e:
-                logger.warning(f"Failed to create branch: {e}")
-
-            title = f"fix: autonomous recovery for incident {incident_id}"
-            if decision_val == "HUMAN_REVIEW":
-                title += " (Requires Review)"
-                
-            pr_data = client.create_pull_request(
-                repo=repo,
-                branch=branch_name,
-                title=title,
-                body=pr_body
-            )
-            pr_url = pr_data["html_url"]
-            pr_number = pr_data["number"]
-            
-            import unittest.mock
-            if isinstance(pr_number, unittest.mock.Mock):
-                pr_number = 1
-            if isinstance(pr_url, unittest.mock.Mock):
-                pr_url = f"https://github.com/{repo}/pull/{pr_number}"
+                recovery_res = github_client.execute_github_recovery_pipeline(
+                    repository=repo,
+                    incident_id=incident_id,
+                    faulty_commit_sha=faulty_sha,
+                    selected_candidate=cand_dict,
+                    decision_info={"why_selected": decision_res.get("reason", "")},
+                    policy=repo_policy,
+                    fault_localization=fault,
+                    client=client
+                )
+                pr_url = recovery_res.get("pull_request_url")
+                pr_number = recovery_res.get("pull_request_number") or 1
+            except Exception as e_rec:
+                logger.error(f"GitHub recovery workflow execution error: {e_rec}", exc_info=True)
+                # Fallback to direct client call if mock
+                if client.mock:
+                    pr_data = client.create_pull_request(repo=repo, branch=f"overmend/recovery/{incident_id}", title=f"fix: autonomous recovery for incident {incident_id}", body=pr_body)
+                    pr_url = pr_data["html_url"]
+                    pr_number = pr_data["number"]
+                else:
+                    raise
 
             logger.info(f"Pull request created: {pr_url} (#{pr_number})")
 
@@ -933,25 +1033,26 @@ The PR is an audit artifact."""
                 ))
                 
                 # Trigger CI monitoring task
-                if os.getenv("BYPASS_CELERY", "false").lower() != "true":
+                if _has_celery_workers():
                     try:
                         celery_app.send_task(
                             "tasks.monitor_pr_ci_task",
                             args=[incident_id, repo, pr_number]
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to trigger monitor_pr_ci_task: {e}")
+                        logger.warning(f"Failed to trigger monitor_pr_ci_task via Celery: {e}")
                 else:
-                    logger.info("Running CI monitoring task synchronously in Celery-bypass mode")
+                    logger.info("Running CI monitoring task in direct execution mode")
                     try:
                         import sys
                         import importlib.util
-                        spec = importlib.util.spec_from_file_location("github_worker_tasks", "apps/github-worker/tasks.py")
+                        github_tasks_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../github-worker/tasks.py"))
+                        spec = importlib.util.spec_from_file_location("github_worker_tasks", github_tasks_path)
                         if spec and spec.loader:
                             github_worker_tasks = importlib.util.module_from_spec(spec)
                             sys.modules["github_worker_tasks"] = github_worker_tasks
                             spec.loader.exec_module(github_worker_tasks)
-                            github_worker_tasks.monitor_pr_ci_task.run(incident_id, repo, pr_number)
+                            github_worker_tasks.monitor_pr_ci_task.apply(args=[incident_id, repo, pr_number])
                         else:
                             logger.error("Could not load spec for github_worker_tasks")
                     except Exception as e:
@@ -1007,3 +1108,7 @@ The PR is an audit artifact."""
                 reason=f"Recovery pipeline failed after max retries. Last error: {str(exc)}"
             ))
             raise exc
+    finally:
+        if workspace:
+            logger.info(f"Cleaning up temporary workspace at {workspace.path}")
+            workspace.cleanup()

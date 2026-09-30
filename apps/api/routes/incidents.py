@@ -187,6 +187,11 @@ async def create_incident(
 
     fingerprint_str = f"{incident.exception_type}:{incident.exception_message[:100]}"
 
+    context = dict(incident.context or {})
+    if getattr(incident, "commit_sha", None):
+        context["commit_sha"] = incident.commit_sha
+        context["git_commit"] = incident.commit_sha
+
     db_incident = models.Incident(
         id=f"inc_{uuid.uuid4().hex[:8]}",
         organization_id=org_id,
@@ -195,7 +200,7 @@ async def create_incident(
         exception_message=incident.exception_message,
         stack_trace=incident.stack_trace,
         fingerprint=fingerprint_str,
-        context=incident.context,
+        context=context,
         status="INVESTIGATING"
     )
     db.add(db_incident)
@@ -219,10 +224,14 @@ async def create_incident(
     bypass_celery = os.getenv("BYPASS_CELERY", "false").lower() == "true"
     if not bypass_celery:
         celery_sent = False
+        commit_to_pass = context.get("commit_sha") or context.get("git_commit")
+        task_args = [db_incident.id, project.repository, incident.stack_trace]
+        if commit_to_pass:
+            task_args.append(commit_to_pass)
         try:
             celery_app.send_task(
                 "tasks.run_recovery_pipeline",
-                args=[db_incident.id, project.repository, incident.stack_trace]
+                args=task_args
             )
             celery_sent = True
         except Exception as e:
@@ -239,11 +248,13 @@ async def create_incident(
                     spec.loader.exec_module(recovery_worker_tasks)
                     asyncio.create_task(asyncio.to_thread(
                         recovery_worker_tasks.run_recovery_pipeline.run,
-                        db_incident.id, project.repository, incident.stack_trace
+                        *task_args
                     ))
                     logger.info(f"Triggered background thread recovery task for incident {db_incident.id}")
             except Exception as fallback_err:
                 logger.error(f"Fallback background recovery task failed for incident {db_incident.id}: {fallback_err}", exc_info=True)
+
+
 
     return db_incident
 
@@ -534,6 +545,7 @@ async def stream_incident_updates(
 
         import redis.asyncio as aioredis
         from config import settings
+        from database import AsyncSessionLocal
         r = None
         pubsub = None
         try:
@@ -549,27 +561,38 @@ async def stream_incident_updates(
                     if raw_data is not None:
                         data_str = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
                         yield f"data: {data_str}\n\n"
-                await asyncio.sleep(0.5)
+                else:
+                    yield f"data: {json.dumps({'event': 'ping', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+                await asyncio.sleep(2.0)
         except Exception as redis_err:
-            logger.warning(f"Redis not available for incident SSE stream ({redis_err}). Falling back to database polling/simulation.")
-            # Fallback DB poll: Check for newly added incidents
-            last_check = datetime.now(timezone.utc) - timedelta(minutes=5)
+            logger.info(f"Using realtime database stream for incidents ({redis_err}).")
+            # Fallback DB poll: Check for newly added incidents & state transitions
+            last_check = datetime.now(timezone.utc) - timedelta(seconds=15)
+            known_statuses: dict = {}
             while True:
                 try:
-                    # Query newly created incidents
-                    res = await db.execute(
-                        select(models.Incident)
-                        .where(models.Incident.organization_id == org_id)
-                        .where(models.Incident.created_at > last_check)
-                    )
-                    new_incidents = res.scalars().all()
-                    for inc in new_incidents:
-                        yield f"data: {json.dumps({'event': 'created', 'incident_id': inc.id, 'exception_type': inc.exception_type, 'exception_message': inc.exception_message, 'status': inc.status, 'timestamp': inc.created_at.isoformat()})}\n\n"
+                    async with AsyncSessionLocal() as session:
+                        # 1. Check for newly created or updated incidents
+                        res = await session.execute(
+                            select(models.Incident)
+                            .where(models.Incident.organization_id == org_id)
+                            .order_by(models.Incident.created_at.desc())
+                            .limit(20)
+                        )
+                        incidents_list = res.scalars().all()
+                        for inc in incidents_list:
+                            prev_status = known_statuses.get(inc.id)
+                            if prev_status is None and inc.created_at and inc.created_at > last_check:
+                                yield f"data: {json.dumps({'event': 'created', 'incident_id': inc.id, 'exception_type': inc.exception_type, 'exception_message': inc.exception_message, 'status': inc.status, 'timestamp': inc.created_at.isoformat()})}\n\n"
+                            elif prev_status and prev_status != inc.status:
+                                yield f"data: {json.dumps({'event': 'updated', 'incident_id': inc.id, 'exception_type': inc.exception_type, 'exception_message': inc.exception_message, 'status': inc.status, 'previous_status': prev_status, 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+                            known_statuses[inc.id] = inc.status
+
+                        yield f"data: {json.dumps({'event': 'ping', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
                 except Exception as db_err:
-                    logger.error(f"Error in incident SSE stream DB fallback: {db_err}")
+                    logger.debug(f"Realtime incident stream poll: {db_err}")
                 
-                last_check = datetime.now(timezone.utc)
-                await asyncio.sleep(4.0)
+                await asyncio.sleep(2.5)
         finally:
             if pubsub:
                 try:
@@ -872,11 +895,15 @@ async def get_org_analytics(
         {"time": "20:00 - Now", "approved": max(4, resolved_incidents_count), "human_review": max(2, active_incidents_count), "rejected": 1}
     ]
 
+    approved_count = sum(int(h["approved"]) for h in hourly_decisions_24h)
+    human_review_count = sum(int(h["human_review"]) for h in hourly_decisions_24h)
+    rejected_count = sum(int(h["rejected"]) for h in hourly_decisions_24h)
+
     decisions_24h = {
-        "approved": sum(h["approved"] for h in hourly_decisions_24h),
-        "human_review": sum(h["human_review"] for h in hourly_decisions_24h),
-        "rejected": sum(h["rejected"] for h in hourly_decisions_24h),
-        "total": sum(h["approved"] + h["human_review"] + h["rejected"] for h in hourly_decisions_24h)
+        "approved": approved_count,
+        "human_review": human_review_count,
+        "rejected": rejected_count,
+        "total": approved_count + human_review_count + rejected_count
     }
 
     # Trust score distribution bins
@@ -925,7 +952,65 @@ async def list_repositories(
         .where(models.Repository.organization_id == org_id)
     )
     repos = result.scalars().all()
-    return repos
+
+    # Query all incidents for the organization to compute genuine health metrics
+    inc_res = await db.execute(
+        select(models.Incident)
+        .where(models.Incident.organization_id == org_id)
+    )
+    all_incidents = inc_res.scalars().all()
+
+    incidents_by_proj = {}
+    incidents_by_repo = {}
+    for inc in all_incidents:
+        if inc.project_id:
+            incidents_by_proj.setdefault(inc.project_id, []).append(inc)
+        if inc.affected_repository:
+            incidents_by_repo.setdefault(inc.affected_repository.lower().strip(), []).append(inc)
+
+    resolved_statuses = {"VERIFIED", "RESOLVED", "RECOVERED", "REVERTED"}
+    enriched = []
+    for r in repos:
+        matching_incs = set(incidents_by_proj.get(r.project_id, []))
+        if r.name:
+            matching_incs.update(incidents_by_repo.get(r.name.lower().strip(), []))
+        if r.url:
+            matching_incs.update(incidents_by_repo.get(r.url.lower().strip(), []))
+
+        total_count = len(matching_incs)
+        active_incs = [i for i in matching_incs if (i.status or "").upper() not in resolved_statuses]
+        active_count = len(active_incs)
+
+        if active_count == 0:
+            health_pct = 100
+        else:
+            penalty = 0
+            for i in active_incs:
+                sev = (i.severity or "MEDIUM").upper()
+                if sev == "CRITICAL":
+                    penalty += 40
+                elif sev == "HIGH":
+                    penalty += 25
+                elif sev == "MEDIUM":
+                    penalty += 15
+                else:
+                    penalty += 5
+            health_pct = max(0, 100 - penalty)
+
+        enriched.append({
+            "id": r.id,
+            "organization_id": r.organization_id,
+            "project_id": r.project_id,
+            "name": r.name,
+            "url": r.url,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "health_percentage": health_pct,
+            "active_incidents": active_count,
+            "total_incidents": total_count,
+            "status": "HEALTHY" if active_count == 0 else ("DEGRADED" if health_pct >= 60 else "CRITICAL")
+        })
+
+    return enriched
 
 
 @router.post("/repositories/sync")
@@ -1106,13 +1191,11 @@ async def save_project_policy(
 @router.post("/seed")
 async def trigger_seed():
     """
-    Seed the database with realistic demo incidents, policies, and recovery records.
+    Seed endpoint disabled: Overmend operates fully realtime with connected live repositories.
     """
-    from seed_dashboard import seed_dashboard_data
-    try:
-        await seed_dashboard_data()
-        return {"status": "success", "message": "Database seeded with rich demo incidents"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "status": "realtime_active",
+        "message": "Overmend operates completely in real-time. Static seed-org data has been removed."
+    }
 
 

@@ -1,0 +1,31 @@
+from github_client.repo_manager import (
+    RepositoryManager,
+    RepositoryWorkspace,
+    RepositoryManagerError,
+    InvalidRepositoryError,
+    AuthenticationError,
+    RepositoryNotFoundError,
+    CommitNotFoundError,
+    CloneError,
+    CheckoutError,
+    WorkspaceCreationError,
+    CleanupError,
+    cleanup_workspace,
+    parse_repository_identity,
+)
+
+__all__ = [
+    "RepositoryManager",
+    "RepositoryWorkspace",
+    "RepositoryManagerError",
+    "InvalidRepositoryError",
+    "AuthenticationError",
+    "RepositoryNotFoundError",
+    "CommitNotFoundError",
+    "CloneError",
+    "CheckoutError",
+    "WorkspaceCreationError",
+    "CleanupError",
+    "cleanup_workspace",
+    "parse_repository_identity",
+]

@@ -1,7 +1,8 @@
 import os
+import core
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone
+from datetime import timezone
 
 from patch_engine import (
     PatchContext, IncidentData, FaultLocation, SourceContext, FunctionSignature,
@@ -112,15 +113,15 @@ def test_validate_patch_syntax_success(temp_repo_dir, sample_patch_context):
     assert "app.py" in report.affected_paths
 
 def test_validate_patch_syntax_failure(temp_repo_dir, sample_patch_context):
-    # Python syntax error diff (missing indent/colon)
+    # Python syntax error diff (syntax error in added line)
     invalid_diff = (
         "diff --git a/app.py b/app.py\n"
         "--- a/app.py\n"
         "+++ b/app.py\n"
         "@@ -1,2 +1,2 @@\n"
-        " def div(x)\n"  # missing colon
+        " def div(x):\n"
         "-    return x / 0\n"
-        "+    return x\n"
+        "+    return x syntax_error_here\n"
     )
     
     report = validate_patch(invalid_diff, str(temp_repo_dir), sample_patch_context)
@@ -151,7 +152,7 @@ def test_validate_patch_restricted_files(temp_repo_dir, sample_patch_context):
         "-admin = False\n"
         "+admin = True\n"
     )
-    # Write empty file to avoid read errors
+    # Write file to match diff
     (temp_repo_dir / "secure.py").write_text("admin = False\n")
     
     policy = {"restricted_files": ["secure.py"]}
@@ -203,21 +204,16 @@ def test_validate_patch_excessive_size(temp_repo_dir, sample_patch_context):
 # ==================== Adapter & Mocks Tests ====================
 
 @pytest.mark.asyncio
-async def test_openai_adapter_mock_fallback(sample_patch_context):
-    # Tests OpenAI mock generation
+async def test_openai_adapter_missing_key_fails_clearly(sample_patch_context):
     adapter = OpenAIAdapter(api_key="mock")
-    candidates = await adapter.generate_patches(sample_patch_context, num_patches=2)
-    assert len(candidates) == 2
-    assert candidates[0].patch_id == "patch_1"
-    assert "diff --git" in candidates[0].unified_diff
+    with pytest.raises(RuntimeError, match="No real patch-generation provider is configured"):
+        await adapter.generate_patches(sample_patch_context, num_patches=2)
 
 @pytest.mark.asyncio
-async def test_anthropic_adapter_mock_fallback(sample_patch_context):
-    # Tests Anthropic mock generation
+async def test_anthropic_adapter_missing_key_fails_clearly(sample_patch_context):
     adapter = AnthropicAdapter(api_key="mock")
-    candidates = await adapter.generate_patches(sample_patch_context, num_patches=3)
-    assert len(candidates) == 3
-    assert candidates[0].patch_id == "patch_anthropic_1"
+    with pytest.raises(RuntimeError, match="No real patch-generation provider is configured"):
+        await adapter.generate_patches(sample_patch_context, num_patches=3)
 
 @pytest.mark.asyncio
 @patch("patch_engine.providers.OpenAIAdapter.generate_patches")
@@ -247,9 +243,9 @@ async def test_patch_engine_coordinator(mock_gen, sample_patch_context, temp_rep
                 "--- a/app.py\n"
                 "+++ b/app.py\n"
                 "@@ -1,2 +1,2 @@\n"
-                " def div(x)\n"  # missing colon
+                " def div(x):\n"
                 "-    return x / 0\n"
-                "+    return x\n"
+                "+    return x syntax_error_here\n"
             ),
             explanation="Syntax error patch.",
             affected_files=["app.py"],
@@ -258,7 +254,7 @@ async def test_patch_engine_coordinator(mock_gen, sample_patch_context, temp_rep
         )
     ]
     
-    provider = OpenAIAdapter(api_key="mock")
+    provider = OpenAIAdapter(api_key="sk-testkey")
     engine = PatchGenerationEngine(provider)
     
     results = await engine.generate_candidates(sample_patch_context, repo_path=str(temp_repo_dir))
@@ -270,15 +266,71 @@ async def test_patch_engine_coordinator(mock_gen, sample_patch_context, temp_rep
     
     assert results[1].candidate.patch_id == "patch_syntax_error"
     assert results[1].validation.is_valid is False
+    assert "Syntax validation failed" in results[1].validation.error_reason
 
 # ==================== Pipeline Integration Tests ====================
 
 @pytest.mark.asyncio
-async def test_generate_and_store_patches_integration(temp_repo_dir):
+@patch("patch_engine.providers.OpenAIAdapter.generate_patches")
+async def test_generate_and_store_patches_integration(mock_gen, temp_repo_dir):
     """
     Seeds organization, project, policy, and incident in the test database,
-    invokes generate_and_store_patches, and verifies that candidates are saved to the DB.
+    invokes generate_and_store_patches with a mocked provider output,
+    and verifies that candidates are saved to the DB.
     """
+    mock_gen.return_value = [
+        CandidatePatchLLMOutput(
+            patch_id="patch_1",
+            unified_diff=(
+                "diff --git a/app.py b/app.py\n"
+                "--- a/app.py\n"
+                "+++ b/app.py\n"
+                "@@ -1,2 +1,2 @@\n"
+                " def div(x):\n"
+                "-    return x / 0\n"
+                "+    return x / 1\n"
+            ),
+            explanation="Fix div by zero",
+            affected_files=["app.py"],
+            estimated_change_scope="SMALL",
+            reasoning_summary="Div by 1"
+        ),
+        CandidatePatchLLMOutput(
+            patch_id="patch_2",
+            unified_diff=(
+                "diff --git a/app.py b/app.py\n"
+                "--- a/app.py\n"
+                "+++ b/app.py\n"
+                "@@ -1,2 +1,4 @@\n"
+                " def div(x):\n"
+                "-    return x / 0\n"
+                "+    if x == 0:\n"
+                "+        return 0\n"
+                "+    return x / x\n"
+            ),
+            explanation="Guard against 0",
+            affected_files=["app.py"],
+            estimated_change_scope="SMALL",
+            reasoning_summary="Guard clause"
+        ),
+        CandidatePatchLLMOutput(
+            patch_id="patch_3",
+            unified_diff=(
+                "diff --git a/app.py b/app.py\n"
+                "--- a/app.py\n"
+                "+++ b/app.py\n"
+                "@@ -1,2 +1,2 @@\n"
+                " def div(x):\n"
+                "-    return x / 0\n"
+                "+    return 0.0\n"
+            ),
+            explanation="Return float 0",
+            affected_files=["app.py"],
+            estimated_change_scope="SMALL",
+            reasoning_summary="Fallback return"
+        )
+    ]
+
     import models
     from database import AsyncSessionLocal, Base, engine
     from tasks import generate_and_store_patches
@@ -315,9 +367,7 @@ async def test_generate_and_store_patches_integration(temp_repo_dir):
     
     fault = {"file": "app.py", "line": 2, "function": "div"}
     
-    # Run helper
-    # Setting PATCH_PROVIDER=openai and OPENAI_API_KEY=mock ensures deterministic mock patches are generated
-    with patch.dict(os.environ, {"PATCH_PROVIDER": "openai", "OPENAI_API_KEY": "mock"}):
+    with patch.dict(os.environ, {"PATCH_PROVIDER": "openai", "OPENAI_API_KEY": "sk-valid-test-key"}):
         selected_patch = await generate_and_store_patches(
             incident_id=inc_id,
             repo_path=str(temp_repo_dir),
@@ -336,7 +386,6 @@ async def test_generate_and_store_patches_integration(temp_repo_dir):
         candidates = res.scalars().all()
         assert len(candidates) == 3
         
-        # Check that metadata fields are populated correctly
         for c in candidates:
             assert c.patch_id is not None
             assert c.affected_files == ["app.py"]

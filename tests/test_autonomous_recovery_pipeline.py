@@ -42,6 +42,7 @@ async def override_get_db():
 def setup_test_database():
     async def create_all():
         async with engine.begin() as conn:
+            await conn.run_sync(lambda sync_conn: Base.metadata.drop_all(sync_conn))
             await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
     try:
         run_sync(create_all())
@@ -218,7 +219,9 @@ async def test_complete_autonomous_recovery_pipeline() -> None:
         # Verify TrustEvaluation record created in DB
         candidate_ids = [c.id for c in candidates]
         te_res = await db.execute(select(models.TrustEvaluation).where(models.TrustEvaluation.patch_candidate_id.in_(candidate_ids)))
-        trust_eval = te_res.scalar_one_or_none()
+        trust_evals = te_res.scalars().all()
+        assert len(trust_evals) > 0
+        trust_eval = trust_evals[0]
         assert trust_eval is not None
         assert trust_eval.mutation_score == 1.0
         assert trust_eval.trust_score >= 0.85

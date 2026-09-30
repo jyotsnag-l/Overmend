@@ -5,6 +5,8 @@ import uuid
 import asyncio
 from datetime import datetime, timezone
 from celery import Celery
+from dotenv import load_dotenv
+load_dotenv(override=False)
 from shared import setup_logging
 
 # Ensure apps/api is in sys.path to access models and database
@@ -146,7 +148,7 @@ def run_sandbox_job(self, job_id_or_patch: str, test_cmd: Optional[str] = None) 
                 inc_res = await db.execute(select(models.Incident).where(models.Incident.id == pc.incident_id))
                 inc = inc_res.scalar_one_or_none()
                 if inc:
-                    commit = inc.context.get("git_commit") or inc.context.get("commit")
+                    commit = inc.context.get("commit_sha") or inc.context.get("git_commit") or inc.context.get("commit")
                     if not commit:
                         ev_res = await db.execute(
                             select(models.IncidentEvent)
@@ -155,7 +157,7 @@ def run_sandbox_job(self, job_id_or_patch: str, test_cmd: Optional[str] = None) 
                         )
                         ev = ev_res.scalars().first()
                         if ev:
-                            commit = ev.payload.get("git_commit") or ev.payload.get("commit")
+                            commit = ev.payload.get("commit_sha") or ev.payload.get("git_commit") or ev.payload.get("commit")
             
             repo_url = repo.url if repo else None
             if not repo_url and proj:
@@ -254,7 +256,7 @@ def run_sandbox_job(self, job_id_or_patch: str, test_cmd: Optional[str] = None) 
                 await db.commit()
 
         run_async(save_execution_results(job_id, result))
-        return result
+        return result.to_dict() if hasattr(result, "to_dict") else result
 
     except Exception as exc:
         logger.error(f"Error running sandbox task {job_id}: {exc}", exc_info=True)

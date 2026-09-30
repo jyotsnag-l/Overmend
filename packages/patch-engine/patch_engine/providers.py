@@ -14,31 +14,34 @@ def extract_json_block(text: str) -> dict:
     Extracts the first JSON block from text, parsing it into a dictionary.
     Handles raw JSON or JSON enclosed in markdown code blocks.
     """
+    if not text or not text.strip():
+        raise ValueError("LLM output is empty or whitespace.")
+
     # Try finding JSON block in markdown
     match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
     if match:
         json_str = match.group(1).strip()
     else:
-        # Fallback: Find the first '{' and last '}'
+        # Fallback: Find the outermost '{' and '}'
         start_idx = text.find("{")
         end_idx = text.rfind("}")
         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
             json_str = text[start_idx:end_idx + 1].strip()
         else:
             json_str = text.strip()
-            
+
     # Parse JSON
     try:
         return json.loads(json_str)
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON from text: {e}. Text: {text}")
+        logger.error(f"Failed to parse JSON from text: {e}. Raw text snippet: {text[:200]}")
         raise ValueError(f"LLM output could not be parsed as JSON: {str(e)}")
 
 def build_system_prompt() -> str:
     return (
         "You are an expert automated software healing agent. Your role is to generate precise, correct "
         "unified diff patches and metadata to fix code incidents.\n\n"
-        "You must generate exactly 3 distinct candidate patches by default. Each patch should have a different "
+        "You must generate distinct candidate patches according to the requested count. Each patch should have a different "
         "approach or rationale (e.g., conservative fix, robust input validation, refactoring/alternative logic).\n\n"
         "You must ONLY respond with a valid JSON object matching the requested schema. Do not include any "
         "conversational text or explanation outside the JSON structure. Write the JSON object inside a single markdown "
@@ -48,28 +51,30 @@ def build_system_prompt() -> str:
         '  "patches": [\n'
         "    {\n"
         '      "patch_id": "patch_1",\n'
-        '      "unified_diff": "diff --git a/filename.py b/filename.py...",\n'
+        '      "unified_diff": "diff --git a/filename.py b/filename.py\\n--- a/filename.py\\n+++ b/filename.py\\n@@ -10,3 +10,3 @@\\n context\\n-old\\n+new\\n context",\n'
         '      "explanation": "...",\n'
         '      "affected_files": ["filename.py"],\n'
         '      "estimated_change_scope": "SMALL",\n'
         '      "reasoning_summary": "..."\n'
-        "    },\n"
-        "    ...\n"
+        "    }\n"
         "  ]\n"
         "}\n"
         "```\n\n"
         "CRITICAL RULES for unified diffs:\n"
         "1. The unified_diff must start with 'diff --git a/file b/file' and contain standard header lines '--- a/file' and '+++ b/file'.\n"
-        "2. Include hunk headers '@@ -start,len +start,len @@' and context lines starting with spaces.\n"
-        "3. Ensure line counts, line additions (+), and line deletions (-) match the original file contents precisely.\n"
-        "4. Do not perform full-file rewrites unless absolutely necessary (i.e. replacing the entire file contents is heavily discouraged; modify only the fault location).\n"
-        "5. Modify ONLY the files that are directly related to the localized bug."
+        "2. Include hunk headers '@@ -start,len +start,len @@' and context lines starting with a space.\n"
+        "3. Ensure line numbers, context lines, additions (+), and deletions (-) match the original file contents precisely.\n"
+        "4. Do NOT perform full-file rewrites unless strictly necessary (modify only the fault location).\n"
+        "5. Modify ONLY the files that are directly related to the localized bug.\n"
+        "6. Do NOT modify tests just to make them pass unless the incident evidence explicitly indicates that the test itself is defective.\n"
+        "7. Do NOT modify configuration or dependencies unless strictly justified by the incident evidence.\n"
+        "8. All candidate patches must be distinct. Do NOT duplicate patches."
     )
 
 def build_user_prompt(context: PatchContext, num_patches: int) -> str:
     # Build related tests representation
     tests_str = "\n".join([f"- File: {t.file}, Function: {t.function or 'all'}" for t in context.related_tests]) or "None"
-    
+
     # Build git history representation
     git_str = ""
     for item in context.git_history:
@@ -79,10 +84,10 @@ def build_user_prompt(context: PatchContext, num_patches: int) -> str:
             git_str += f"- Commit: {item.commit_hash[:8] if item.commit_hash else 'unknown'} | Author: {item.author} | Summary: {item.summary}\n"
     if not git_str:
         git_str = "None"
-        
+
     # Build historical context representation
     hist_str = ""
-    for i, inc in enumerate(context.historical_context):
+    for inc in context.historical_context:
         hist_str += f"- Incident {inc.get('id', 'unknown')}: Type: {inc.get('exception_type')}, Message: {inc.get('exception_message')}, Status: {inc.get('status')}\n"
     for fix in context.historical_fixes:
         hist_str += f"- Fix: Incident {fix.incident_id} | Patch ID: {fix.patch_id} | Diff:\n{fix.unified_diff}\n"
@@ -92,15 +97,15 @@ def build_user_prompt(context: PatchContext, num_patches: int) -> str:
     # Build source context details
     src_ctx = context.source_context
     faulting_file = src_ctx.faulting_file or "unknown"
-    
+
     faulting_func_code = "None"
     if src_ctx.faulting_function:
         faulting_func_code = f"Lines {src_ctx.faulting_function.start_line}-{src_ctx.faulting_function.end_line}:\n{src_ctx.faulting_function.code}"
-        
+
     surrounding_code = "None"
     if src_ctx.surrounding_lines:
         surrounding_code = f"Lines {src_ctx.surrounding_lines.start_line}-{src_ctx.surrounding_lines.end_line}:\n{src_ctx.surrounding_lines.code}"
-        
+
     calling_func_code = "None"
     if src_ctx.calling_function:
         calling_func_code = f"File: {src_ctx.calling_function.file}, Function: {src_ctx.calling_function.function}, Lines {src_ctx.calling_function.start_line}-{src_ctx.calling_function.end_line}:\n{src_ctx.calling_function.code}"
@@ -134,7 +139,22 @@ def build_user_prompt(context: PatchContext, num_patches: int) -> str:
         f"Please output a JSON object containing the patches list according to the schema specified."
     )
 
+class ProviderConfigurationError(RuntimeError):
+    """Raised when an LLM provider is not configured or missing required API keys."""
+    pass
+
 class LLMProvider(ABC):
+    @property
+    @abstractmethod
+    def is_configured(self) -> bool:
+        """Returns True if the provider is fully configured with required credentials."""
+        pass
+
+    @abstractmethod
+    def validate_configuration(self) -> None:
+        """Validates configuration, raising ProviderConfigurationError if not configured."""
+        pass
+
     @abstractmethod
     async def generate_patches(self, context: PatchContext, num_patches: int = 3) -> List[CandidatePatchLLMOutput]:
         """
@@ -143,442 +163,297 @@ class LLMProvider(ABC):
         pass
 
 class OpenAIAdapter(LLMProvider):
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: str = "gpt-4o"):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "mock")
-        self.model = model
-        self.base_url = base_url
-        
-        # Instantiate client when not in mock mode or if packages are installed
-        if self.api_key != "mock":
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o")
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
+        self.client = None
+
+        if self.api_key and self.api_key.strip() and self.api_key.lower() != "mock":
             try:
                 from openai import OpenAI
                 self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-            except ImportError:
+            except Exception:
                 self.client = None
-        else:
-            self.client = None
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.api_key.strip() and self.api_key.lower() != "mock" and self.client is not None)
+
+    def validate_configuration(self) -> None:
+        if not self.api_key or not self.api_key.strip() or self.api_key.lower() == "mock":
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "OpenAI API key (OPENAI_API_KEY) is missing or not configured."
+            )
+        if self.client is None:
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "OpenAI client could not be initialized or openai package is not installed."
+            )
 
     async def generate_patches(self, context: PatchContext, num_patches: int = 3) -> List[CandidatePatchLLMOutput]:
+        self.validate_configuration()
+
         system_prompt = build_system_prompt()
         user_prompt = build_user_prompt(context, num_patches)
-        
-        if self.api_key == "mock" or not self.client:
-            logger.info("Using mock OpenAI response")
-            # Return a default mock structure
-            return self._get_mock_response(context, num_patches)
-            
+
         try:
-            # We call in executor or async if available, but since standard client is sync, we run in executor
             import asyncio
-            loop = asyncio.get_event_loop()
-            
-            def make_call():
-                return self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.2,
-                )
-                
-            response = await loop.run_in_executor(None, make_call)
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        def make_call():
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+            )
+
+        try:
+            if loop and loop.is_running():
+                response = await loop.run_in_executor(None, make_call)
+            else:
+                response = make_call()
+
             text_content = response.choices[0].message.content
-            
-            # Parse JSON response
             parsed_data = extract_json_block(text_content)
             validated_response = LLMPatchesResponse.model_validate(parsed_data)
             return validated_response.patches
-            
+
         except Exception as e:
             logger.error(f"Error calling OpenAI API: {e}", exc_info=True)
             raise RuntimeError(f"OpenAI Patch Generation failed: {str(e)}")
 
-    def _get_mock_response(self, context: PatchContext, num_patches: int) -> List[CandidatePatchLLMOutput]:
-        # Generate mock patches matching the schema
-        fault_file = context.fault_location.file or "main.py"
-        
-        if "users.py" in fault_file:
-            return [
-                CandidatePatchLLMOutput(
-                    patch_id="patch_1",
-                    unified_diff=(
-                        "diff --git a/users.py b/users.py\n"
-                        "--- a/users.py\n"
-                        "+++ b/users.py\n"
-                        "@@ -4,2 +4,2 @@\n"
-                        "     # Intentional bug: profile_db is not defined, which raises NameError at runtime\n"
-                        "-    return profile_db[user_id]\n"
-                        "+    return profile_db[user_id] syntax_error_here\n"
-                    ),
-                    explanation="Mock explanation for invalid syntax patch A.",
-                    affected_files=["users.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Syntax error patch."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_2",
-                    unified_diff=(
-                        "diff --git a/users.py b/users.py\n"
-                        "--- a/users.py\n"
-                        "+++ b/users.py\n"
-                        "@@ -4,2 +4,3 @@\n"
-                        "     # Intentional bug: profile_db is not defined, which raises NameError at runtime\n"
-                        "-    return profile_db[user_id]\n"
-                        "+    profile_db = {1: {'name': 'Alice'}}\n"
-                        "+    return profile_db.get(user_id, {})\n"
-                    ),
-                    explanation="Mock explanation for logic-only patch B.",
-                    affected_files=["users.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Logic-only patch without updating tests."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_3",
-                    unified_diff=(
-                        "diff --git a/users.py b/users.py\n"
-                        "--- a/users.py\n"
-                        "+++ b/users.py\n"
-                        "@@ -4,2 +4,3 @@\n"
-                        "     # Intentional bug: profile_db is not defined, which raises NameError at runtime\n"
-                        "-    return profile_db[user_id]\n"
-                        "+    profile_db = {1: {'name': 'Alice'}}\n"
-                        "+    return profile_db.get(user_id, {})\n"
-                        "diff --git a/tests/test_users.py b/tests/test_users.py\n"
-                        "--- a/tests/test_users.py\n"
-                        "+++ b/tests/test_users.py\n"
-                        "@@ -1,14 +1,11 @@\n"
-                        "-import pytest\n"
-                        "-from users import get_user_profile\n"
-                        "-\n"
-                        "-def test_get_user_profile_name_error() -> None:\n"
-                        "-    # Assert that accessing a profile raises NameError due to the bug\n"
-                        "-    with pytest.raises(NameError) as exc_info:\n"
-                        "-        get_user_profile(1)\n"
-                        "-    assert \"profile_db\" in str(exc_info.value)\n"
-                        "-\n"
-                        "-def test_get_user_profile_invalid_id() -> None:\n"
-                        "-    # Assert that negative IDs raise ValueError\n"
-                        "-    with pytest.raises(ValueError) as exc_info:\n"
-                        "-        get_user_profile(-1)\n"
-                        "-    assert \"Invalid user_id\" in str(exc_info.value)\n"
-                        "+import pytest\n"
-                        "+from users import get_user_profile\n"
-                        "+\n"
-                        "+def test_get_user_profile_name_error() -> None:\n"
-                        "+    assert get_user_profile(1) == {'name': 'Alice'}\n"
-                        "+\n"
-                        "+def test_get_user_profile_invalid_id() -> None:\n"
-                        "+    # Assert that negative IDs raise ValueError\n"
-                        "+    with pytest.raises(ValueError) as exc_info:\n"
-                        "+        get_user_profile(-1)\n"
-                        "+    assert \"Invalid user_id\" in str(exc_info.value)\n"
-                    ),
-                    explanation="Mock explanation for logic and test patch C.",
-                    affected_files=["users.py", "tests/test_users.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Complete fix for logic and tests."
-                )
-            ][:num_patches]
-        elif "payments.py" in fault_file:
-            return [
-                CandidatePatchLLMOutput(
-                    patch_id="patch_1",
-                    unified_diff=(
-                        "diff --git a/payments.py b/payments.py\n"
-                        "--- a/payments.py\n"
-                        "+++ b/payments.py\n"
-                        "@@ -3,3 +3,3 @@\n"
-                        "     if refund_ratio == 0:\n"
-                        "-        return amount / 0  # Intentionally raise ZeroDivisionError\n"
-                        "+        return amount / 0 syntax_error_here\n"
-                        "     return amount * refund_ratio\n"
-                    ),
-                    explanation="Mock explanation for invalid syntax patch A.",
-                    affected_files=["payments.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Syntax error patch."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_2",
-                    unified_diff=(
-                        "diff --git a/payments.py b/payments.py\n"
-                        "--- a/payments.py\n"
-                        "+++ b/payments.py\n"
-                        "@@ -3,3 +3,3 @@\n"
-                        "     if refund_ratio == 0:\n"
-                        "-        return amount / 0  # Intentionally raise ZeroDivisionError\n"
-                        "+        return 0.0\n"
-                        "     return amount * refund_ratio\n"
-                    ),
-                    explanation="Mock explanation for logic-only patch B.",
-                    affected_files=["payments.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Logic-only patch without updating tests."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_3",
-                    unified_diff=(
-                        "diff --git a/payments.py b/payments.py\n"
-                        "--- a/payments.py\n"
-                        "+++ b/payments.py\n"
-                        "@@ -3,3 +3,3 @@\n"
-                        "     if refund_ratio == 0:\n"
-                        "-        return amount / 0  # Intentionally raise ZeroDivisionError\n"
-                        "+        return 0.0\n"
-                        "     return amount * refund_ratio\n"
-                        "diff --git a/tests/test_payments.py b/tests/test_payments.py\n"
-                        "--- a/tests/test_payments.py\n"
-                        "+++ b/tests/test_payments.py\n"
-                        "@@ -7,4 +7,2 @@\n"
-                        " def test_calculate_refund_zero_ratio() -> None:\n"
-                        "-    # This will raise ZeroDivisionError which serves as the error-recovery trigger\n"
-                        "-    with pytest.raises(ZeroDivisionError):\n"
-                        "-        calculate_refund(100.0, 0.0)\n"
-                        "+    assert calculate_refund(100.0, 0.0) == 0.0\n"
-                    ),
-                    explanation="Mock explanation for logic and test patch C.",
-                    affected_files=["payments.py", "tests/test_payments.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Complete fix for logic and tests."
-                )
-            ][:num_patches]
-
-        patches = []
-        for i in range(1, num_patches + 1):
-            patches.append(CandidatePatchLLMOutput(
-                patch_id=f"patch_{i}",
-                unified_diff=(
-                    f"diff --git a/{fault_file} b/{fault_file}\n"
-                    f"--- a/{fault_file}\n"
-                    f"+++ b/{fault_file}\n"
-                    f"@@ -1,2 +1,2 @@\n"
-                    f" def div(x):\n"
-                    f"-    return x / 0\n"
-                    f"+    return x / {i}\n"
-                ),
-                explanation=f"Mock explanation for approach {i}.",
-                affected_files=[fault_file],
-                estimated_change_scope="SMALL",
-                reasoning_summary=f"Mock reasoning for approach {i}."
-            ))
-        return patches
-
 class AnthropicAdapter(LLMProvider):
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: str = "claude-3-5-sonnet-20241022"):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "mock")
-        self.model = model
-        self.base_url = base_url
-        
-        if self.api_key != "mock":
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key if api_key is not None else os.getenv("ANTHROPIC_API_KEY")
+        self.model = model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+        self.base_url = base_url or os.getenv("ANTHROPIC_BASE_URL")
+        self.client = None
+
+        if self.api_key and self.api_key.strip() and self.api_key.lower() != "mock":
             try:
                 from anthropic import Anthropic
                 self.client = Anthropic(api_key=self.api_key, base_url=self.base_url)
-            except ImportError:
+            except Exception:
                 self.client = None
-        else:
-            self.client = None
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.api_key.strip() and self.api_key.lower() != "mock" and self.client is not None)
+
+    def validate_configuration(self) -> None:
+        if not self.api_key or not self.api_key.strip() or self.api_key.lower() == "mock":
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "Anthropic API key (ANTHROPIC_API_KEY) is missing or not configured."
+            )
+        if self.client is None:
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "Anthropic client could not be initialized or anthropic package is not installed."
+            )
 
     async def generate_patches(self, context: PatchContext, num_patches: int = 3) -> List[CandidatePatchLLMOutput]:
+        self.validate_configuration()
+
         system_prompt = build_system_prompt()
         user_prompt = build_user_prompt(context, num_patches)
-        
-        if self.api_key == "mock" or not self.client:
-            logger.info("Using mock Anthropic response")
-            return self._get_mock_response(context, num_patches)
-            
+
         try:
             import asyncio
-            loop = asyncio.get_event_loop()
-            
-            def make_call():
-                return self.client.messages.create(
-                    model=self.model,
-                    system=system_prompt,
-                    messages=[
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    max_tokens=4000,
-                    temperature=0.2
-                )
-                
-            response = await loop.run_in_executor(None, make_call)
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        def make_call():
+            return self.client.messages.create(
+                model=self.model,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=4000,
+                temperature=0.2
+            )
+
+        try:
+            if loop and loop.is_running():
+                response = await loop.run_in_executor(None, make_call)
+            else:
+                response = make_call()
+
             text_content = response.content[0].text
-            
             parsed_data = extract_json_block(text_content)
             validated_response = LLMPatchesResponse.model_validate(parsed_data)
             return validated_response.patches
-            
+
         except Exception as e:
             logger.error(f"Error calling Anthropic API: {e}", exc_info=True)
             raise RuntimeError(f"Anthropic Patch Generation failed: {str(e)}")
 
-    def _get_mock_response(self, context: PatchContext, num_patches: int) -> List[CandidatePatchLLMOutput]:
-        # Generate mock patches matching the schema
-        fault_file = context.fault_location.file or "main.py"
-        
-        if "users.py" in fault_file:
-            return [
-                CandidatePatchLLMOutput(
-                    patch_id="patch_anthropic_1",
-                    unified_diff=(
-                        "diff --git a/users.py b/users.py\n"
-                        "--- a/users.py\n"
-                        "+++ b/users.py\n"
-                        "@@ -4,2 +4,2 @@\n"
-                        "     # Intentional bug: profile_db is not defined, which raises NameError at runtime\n"
-                        "-    return profile_db[user_id]\n"
-                        "+    return profile_db[user_id] syntax_error_here\n"
-                    ),
-                    explanation="Mock explanation for invalid syntax patch A.",
-                    affected_files=["users.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Syntax error patch."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_anthropic_2",
-                    unified_diff=(
-                        "diff --git a/users.py b/users.py\n"
-                        "--- a/users.py\n"
-                        "+++ b/users.py\n"
-                        "@@ -4,2 +4,3 @@\n"
-                        "     # Intentional bug: profile_db is not defined, which raises NameError at runtime\n"
-                        "-    return profile_db[user_id]\n"
-                        "+    profile_db = {1: {'name': 'Alice'}}\n"
-                        "+    return profile_db.get(user_id, {})\n"
-                    ),
-                    explanation="Mock explanation for logic-only patch B.",
-                    affected_files=["users.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Logic-only patch without updating tests."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_anthropic_3",
-                    unified_diff=(
-                        "diff --git a/users.py b/users.py\n"
-                        "--- a/users.py\n"
-                        "+++ b/users.py\n"
-                        "@@ -4,2 +4,3 @@\n"
-                        "     # Intentional bug: profile_db is not defined, which raises NameError at runtime\n"
-                        "-    return profile_db[user_id]\n"
-                        "+    profile_db = {1: {'name': 'Alice'}}\n"
-                        "+    return profile_db.get(user_id, {})\n"
-                        "diff --git a/tests/test_users.py b/tests/test_users.py\n"
-                        "--- a/tests/test_users.py\n"
-                        "+++ b/tests/test_users.py\n"
-                        "@@ -1,14 +1,11 @@\n"
-                        "-import pytest\n"
-                        "-from users import get_user_profile\n"
-                        "-\n"
-                        "-def test_get_user_profile_name_error() -> None:\n"
-                        "-    # Assert that accessing a profile raises NameError due to the bug\n"
-                        "-    with pytest.raises(NameError) as exc_info:\n"
-                        "-        get_user_profile(1)\n"
-                        "-    assert \"profile_db\" in str(exc_info.value)\n"
-                        "-\n"
-                        "-def test_get_user_profile_invalid_id() -> None:\n"
-                        "-    # Assert that negative IDs raise ValueError\n"
-                        "-    with pytest.raises(ValueError) as exc_info:\n"
-                        "-        get_user_profile(-1)\n"
-                        "-    assert \"Invalid user_id\" in str(exc_info.value)\n"
-                        "+import pytest\n"
-                        "+from users import get_user_profile\n"
-                        "+\n"
-                        "+def test_get_user_profile_name_error() -> None:\n"
-                        "+    assert get_user_profile(1) == {'name': 'Alice'}\n"
-                        "+\n"
-                        "+def test_get_user_profile_invalid_id() -> None:\n"
-                        "+    # Assert that negative IDs raise ValueError\n"
-                        "+    with pytest.raises(ValueError) as exc_info:\n"
-                        "+        get_user_profile(-1)\n"
-                        "+    assert \"Invalid user_id\" in str(exc_info.value)\n"
-                    ),
-                    explanation="Mock explanation for logic and test patch C.",
-                    affected_files=["users.py", "tests/test_users.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Complete fix for logic and tests."
+class GeminiAdapter(LLMProvider):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key if api_key is not None else (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        self.client = None
+
+        if self.api_key and self.api_key.strip() and self.api_key.lower() != "mock":
+            try:
+                from google import genai
+                self.client = genai.Client(api_key=self.api_key)
+            except Exception:
+                self.client = None
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.api_key.strip() and self.api_key.lower() != "mock" and self.client is not None)
+
+    def validate_configuration(self) -> None:
+        if not self.api_key or not self.api_key.strip() or self.api_key.lower() == "mock":
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "Google Gemini API key (GOOGLE_API_KEY) is missing or not configured."
+            )
+        if self.client is None:
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "Gemini client could not be initialized or google-genai package is not installed."
+            )
+
+    async def generate_patches(self, context: PatchContext, num_patches: int = 3) -> List[CandidatePatchLLMOutput]:
+        self.validate_configuration()
+
+        system_prompt = build_system_prompt()
+        user_prompt = build_user_prompt(context, num_patches)
+
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        def make_call():
+            from google.genai import types
+            return self.client.models.generate_content(
+                model=self.model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.2,
                 )
-            ][:num_patches]
-        elif "payments.py" in fault_file:
-            return [
-                CandidatePatchLLMOutput(
-                    patch_id="patch_anthropic_1",
-                    unified_diff=(
-                        "diff --git a/payments.py b/payments.py\n"
-                        "--- a/payments.py\n"
-                        "+++ b/payments.py\n"
-                        "@@ -3,3 +3,3 @@\n"
-                        "     if refund_ratio == 0:\n"
-                        "-        return amount / 0  # Intentionally raise ZeroDivisionError\n"
-                        "+        return amount / 0 syntax_error_here\n"
-                        "     return amount * refund_ratio\n"
-                    ),
-                    explanation="Mock explanation for invalid syntax patch A.",
-                    affected_files=["payments.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Syntax error patch."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_anthropic_2",
-                    unified_diff=(
-                        "diff --git a/payments.py b/payments.py\n"
-                        "--- a/payments.py\n"
-                        "+++ b/payments.py\n"
-                        "@@ -3,3 +3,3 @@\n"
-                        "     if refund_ratio == 0:\n"
-                        "-        return amount / 0  # Intentionally raise ZeroDivisionError\n"
-                        "+        return 0.0\n"
-                        "     return amount * refund_ratio\n"
-                    ),
-                    explanation="Mock explanation for logic-only patch B.",
-                    affected_files=["payments.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Logic-only patch without updating tests."
-                ),
-                CandidatePatchLLMOutput(
-                    patch_id="patch_anthropic_3",
-                    unified_diff=(
-                        "diff --git a/payments.py b/payments.py\n"
-                        "--- a/payments.py\n"
-                        "+++ b/payments.py\n"
-                        "@@ -3,3 +3,3 @@\n"
-                        "     if refund_ratio == 0:\n"
-                        "-        return amount / 0  # Intentionally raise ZeroDivisionError\n"
-                        "+        return 0.0\n"
-                        "     return amount * refund_ratio\n"
-                        "diff --git a/tests/test_payments.py b/tests/test_payments.py\n"
-                        "--- a/tests/test_payments.py\n"
-                        "+++ b/tests/test_payments.py\n"
-                        "@@ -7,4 +7,2 @@\n"
-                        " def test_calculate_refund_zero_ratio() -> None:\n"
-                        "-    # This will raise ZeroDivisionError which serves as the error-recovery trigger\n"
-                        "-    with pytest.raises(ZeroDivisionError):\n"
-                        "-        calculate_refund(100.0, 0.0)\n"
-                        "+    assert calculate_refund(100.0, 0.0) == 0.0\n"
-                    ),
-                    explanation="Mock explanation for logic and test patch C.",
-                    affected_files=["payments.py", "tests/test_payments.py"],
-                    estimated_change_scope="SMALL",
-                    reasoning_summary="Complete fix for logic and tests."
-                )
-            ][:num_patches]
-        
-        patches = []
-        for i in range(1, num_patches + 1):
-            patches.append(CandidatePatchLLMOutput(
-                patch_id=f"patch_anthropic_{i}",
-                unified_diff=(
-                    f"diff --git a/{fault_file} b/{fault_file}\n"
-                    f"--- a/{fault_file}\n"
-                    f"+++ b/{fault_file}\n"
-                    f"@@ -1,2 +1,2 @@\n"
-                    f" def div(x):\n"
-                    f"-    return x / 0\n"
-                    f"+    return x / {i * 10}\n"
-                ),
-                explanation=f"Mock Anthropic explanation for approach {i}.",
-                affected_files=[fault_file],
-                estimated_change_scope="SMALL",
-                reasoning_summary=f"Mock Anthropic reasoning for approach {i}."
-            ))
-        return patches
+            )
+
+        try:
+            if loop and loop.is_running():
+                response = await loop.run_in_executor(None, make_call)
+            else:
+                response = make_call()
+
+            text_content = response.text
+            parsed_data = extract_json_block(text_content)
+            validated_response = LLMPatchesResponse.model_validate(parsed_data)
+            return validated_response.patches
+
+        except Exception as e:
+            logger.error(f"Error calling Gemini API: {e}", exc_info=True)
+            raise RuntimeError(f"Gemini Patch Generation failed: {str(e)}")
+
+class GrokAdapter(LLMProvider):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
+        raw_key = api_key if api_key is not None else (os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY"))
+        self.api_key = raw_key.strip() if raw_key else None
+
+        is_groq = bool(self.api_key and self.api_key.startswith("gsk_"))
+        default_base = "https://api.groq.com/openai/v1" if is_groq else "https://api.x.ai/v1"
+        default_model = "qwen/qwen3.8-27b" if is_groq else "grok-2-latest"
+
+        self.base_url = base_url or os.getenv("GROK_BASE_URL") or default_base
+        self.model = model or os.getenv("GROK_MODEL") or default_model
+        self.client = None
+
+        if self.api_key and self.api_key.strip() and self.api_key.lower() != "mock":
+            try:
+                from openai import OpenAI
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            except Exception:
+                self.client = None
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.api_key.strip() and self.api_key.lower() != "mock" and self.client is not None)
+
+    def validate_configuration(self) -> None:
+        if not self.api_key or not self.api_key.strip() or self.api_key.lower() == "mock":
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "Grok / xAI API key (XAI_API_KEY) is missing or not configured."
+            )
+        if self.client is None:
+            raise ProviderConfigurationError(
+                "PROVIDER_NOT_CONFIGURED: No real patch-generation provider is configured. "
+                "Grok client could not be initialized or openai package is not installed."
+            )
+
+    async def generate_patches(self, context: PatchContext, num_patches: int = 3) -> List[CandidatePatchLLMOutput]:
+        self.validate_configuration()
+
+        system_prompt = build_system_prompt()
+        user_prompt = build_user_prompt(context, num_patches)
+
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        def make_call():
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+            )
+
+        try:
+            if loop and loop.is_running():
+                response = await loop.run_in_executor(None, make_call)
+            else:
+                response = make_call()
+
+            text_content = response.choices[0].message.content
+            parsed_data = extract_json_block(text_content)
+            validated_response = LLMPatchesResponse.model_validate(parsed_data)
+            return validated_response.patches
+
+        except Exception as e:
+            logger.error(f"Error calling Grok/xAI API: {e}", exc_info=True)
+            raise RuntimeError(f"Grok Patch Generation failed: {str(e)}")
+
+def get_provider(provider_name: Optional[str] = None, **kwargs) -> LLMProvider:
+    """
+    Factory to resolve and instantiate the configured LLMProvider.
+    Supported providers: 'openai', 'grok' (or 'xai'), 'gemini', 'anthropic'.
+    Does not silently fall back to other providers.
+    """
+    name = (provider_name or os.getenv("PATCH_PROVIDER", "openai")).lower().strip()
+    if name == "openai":
+        return OpenAIAdapter(**kwargs)
+    elif name in ("grok", "xai"):
+        return GrokAdapter(**kwargs)
+    elif name == "gemini":
+        return GeminiAdapter(**kwargs)
+    elif name == "anthropic":
+        return AnthropicAdapter(**kwargs)
+    else:
+        raise ProviderConfigurationError(
+            f"Unsupported PATCH_PROVIDER: '{name}'. Supported providers: openai, grok, gemini, anthropic"
+        )
+

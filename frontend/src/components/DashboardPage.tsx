@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell,
-  BarChart, Bar, Legend, CartesianGrid
+  BarChart, Bar, CartesianGrid
 } from 'recharts';
 import { fetchOrgAnalytics, fetchIncidents, OrgAnalytics, Incident, API_URL, getHeaders, triggerDemoIncident } from '../api';
 
@@ -21,7 +21,7 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [liveBanner, setLiveBanner] = useState<{ msg: string; type: string } | null>(null);
   const [injecting, setInjecting] = useState(false);
 
-  const orgId = localStorage.getItem('active_org_id') || 'org_seed';
+  const orgId = localStorage.getItem('active_org_id') || 'org_overmend';
 
   const handleInjectEvent = async () => {
     setInjecting(true);
@@ -39,13 +39,11 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
         onNavigate('IncidentDetail', { incidentId: inc.id });
       }
     } catch (err) {
-      console.error('Failed to inject demo incident', err);
+      console.error('Failed to inject live incident', err);
     } finally {
       setInjecting(false);
     }
   };
-
-
 
   const loadData = async () => {
     try {
@@ -66,7 +64,7 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
 
   useEffect(() => {
     loadData();
-    const poll = setInterval(loadData, 10000);
+    const poll = setInterval(loadData, 4000);
 
     let eventSource: EventSource | null = null;
     try {
@@ -79,11 +77,18 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           const data = JSON.parse(event.data);
           if (data.event === 'created') {
             setLiveBanner({
-              msg: `CRITICAL: New ${data.exception_type} detected in production environment!`,
+              msg: `CRITICAL: New ${data.exception_type} detected in realtime production stream!`,
               type: 'error'
             });
             loadData();
             setTimeout(() => setLiveBanner(null), 6000);
+          } else if (data.event === 'updated') {
+            setLiveBanner({
+              msg: `Realtime Pipeline Transition: Incident ${data.incident_id?.slice(0, 8)} updated to ${data.status}`,
+              type: 'info'
+            });
+            loadData();
+            setTimeout(() => setLiveBanner(null), 4000);
           }
         } catch (e) {
           console.error('Failed to parse SSE event data', e);

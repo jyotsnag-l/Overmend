@@ -31,15 +31,27 @@ export interface Profile {
 }
 
 export const SIMULATED_PROFILES: Profile[] = [
-  { id: 'usr_seed', email: 'seed_user@example.com', name: 'Seed Owner', role: 'OWNER' },
+  { id: 'usr_jyotsna', email: 'jyotsnag.amcec@gmail.com', name: 'Jyotsna G L', role: 'OWNER' },
   { id: 'usr_admin', email: 'admin_user@example.com', name: 'Admin User', role: 'ADMIN' },
   { id: 'usr_reviewer', email: 'reviewer_user@example.com', name: 'Security Reviewer', role: 'REVIEWER' },
   { id: 'usr_engineer', email: 'engineer_user@example.com', name: 'Software Engineer', role: 'ENGINEER' },
   { id: 'usr_viewer', email: 'viewer_user@example.com', name: 'ReadOnly Viewer', role: 'VIEWER' }
 ];
 
+// Cleanse legacy seed-org from browser localStorage
+if (typeof window !== 'undefined') {
+  if (localStorage.getItem('active_org_id') === 'org_seed') {
+    localStorage.setItem('active_org_id', 'org_overmend');
+  }
+  if (localStorage.getItem('active_user_email') === 'seed_user@example.com') {
+    localStorage.setItem('active_user_email', 'jyotsnag.amcec@gmail.com');
+    localStorage.setItem('active_user_id', 'usr_jyotsna');
+    localStorage.setItem('active_user_name', 'Jyotsna G L');
+  }
+}
+
 export function getSimulatedProfile(): Profile {
-  const email = localStorage.getItem('active_user_email') || 'seed_user@example.com';
+  const email = localStorage.getItem('active_user_email') || 'jyotsnag.amcec@gmail.com';
   const profile = SIMULATED_PROFILES.find(p => p.email === email);
   return profile || SIMULATED_PROFILES[0];
 }
@@ -55,17 +67,17 @@ export function setSimulatedProfile(email: string) {
 }
 
 // Set up default values on first load
-if (!localStorage.getItem('active_user_email')) {
-  setSimulatedProfile('seed_user@example.com');
-  localStorage.setItem('active_org_id', 'org_seed');
+if (typeof window !== 'undefined' && !localStorage.getItem('active_user_email')) {
+  setSimulatedProfile('jyotsnag.amcec@gmail.com');
+  localStorage.setItem('active_org_id', 'org_overmend');
 }
 
 export function getHeaders(): Record<string, string> {
-  const email = localStorage.getItem('active_user_email') || 'seed_user@example.com';
-  const role = localStorage.getItem('active_user_role') || 'OWNER';
-  const orgId = localStorage.getItem('active_org_id') || 'org_seed';
-  const userId = localStorage.getItem('active_user_id') || 'usr_seed';
-  const name = localStorage.getItem('active_user_name') || 'Seed Owner';
+  const email = (typeof window !== 'undefined' && localStorage.getItem('active_user_email')) || 'jyotsnag.amcec@gmail.com';
+  const role = (typeof window !== 'undefined' && localStorage.getItem('active_user_role')) || 'OWNER';
+  const orgId = (typeof window !== 'undefined' && localStorage.getItem('active_org_id')) || 'org_overmend';
+  const userId = (typeof window !== 'undefined' && localStorage.getItem('active_user_id')) || 'usr_jyotsna';
+  const name = (typeof window !== 'undefined' && localStorage.getItem('active_user_name')) || 'Jyotsna G L';
 
   return {
     'Content-Type': 'application/json',
@@ -215,6 +227,10 @@ export interface Repository {
   name: string;
   url: string;
   created_at: string;
+  health_percentage?: number;
+  active_incidents?: number;
+  total_incidents?: number;
+  status?: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
 }
 
 export interface AuditLog {
@@ -351,37 +367,64 @@ export async function listAuditLogs(): Promise<AuditLog[]> {
   return res.json();
 }
 
-// Trigger simulated incident to showcase pipeline
-export async function triggerDemoIncident(type: string, msg: string, file: string, line: number): Promise<Incident> {
+// Trigger live incident to exercise autonomous recovery pipeline in real time
+export async function triggerDemoIncident(
+  type?: string,
+  msg?: string,
+  file?: string,
+  line?: number,
+  stackTrace?: string,
+  commitSha?: string
+): Promise<Incident> {
+  const projectId = 'proj_04102d07';
+  const repoName = 'jyotsnag-l/recovery-test-repo';
+  const targetCommit = commitSha || 'a9ca1cde1290cffc76efaea7d4eba107765ebf43';
+
   // 1. Ensure project exists
   await fetch(`${API_URL}/api/v1/projects`, {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({
-      id: 'proj_seed',
-      name: 'Seed Project',
-      repository: 'seed-org/seed-repo'
+      id: projectId,
+      name: 'recovery-test-repo',
+      repository: repoName
     })
-  }).catch(() => {});
+  }).catch(() => { });
+
+  const excType = type || 'AssertionError';
+  const excMsg = msg || 'assert 201 == 400 - Order exceeding stock quantity accepted with status 201 Created instead of 400 Bad Request';
+  const targetFile = file || 'app/services/inventory_service.py';
+  const targetLine = line || 46;
+  const realStackTrace = stackTrace ||
+`Traceback (most recent call last):
+  File "app/services/inventory_service.py", line ${targetLine}, in validate_stock_availability
+    if item.stock_quantity <= 0:
+  File "tests/test_orders.py", line 44, in test_create_order_exceeding_stock_should_fail
+    assert response.status_code == 400
+AssertionError: assert 201 == 400
++ where 201 = <Response [201 Created]>.status_code`;
+
+  const eventPayload: Record<string, any> = {
+    project_id: projectId,
+    exception_type: excType,
+    exception_message: excMsg,
+    stack_trace: realStackTrace,
+    environment: 'production',
+    git_commit: targetCommit,
+    commit_sha: targetCommit,
+    file: targetFile,
+    line: targetLine,
+    function: 'validate_stock_availability'
+  };
 
   // 2. Post SDK Ingestion event
   const res = await fetch(`${API_URL}/api/v1/events`, {
     method: 'POST',
     headers: {
       ...getHeaders(),
-      'X-Project-ID': 'proj_seed'
+      'X-Project-ID': projectId
     },
-    body: JSON.stringify({
-      project_id: 'proj_seed',
-      exception_type: type,
-      exception_message: msg,
-      stack_trace: `Traceback (most recent call last):\n  File "${file}", line ${line}, in run_task\n    raise ${type}("${msg}")`,
-      file,
-      line,
-      function: 'run_task',
-      environment: 'production',
-      git_commit: 'e1129b828114f'
-    })
+    body: JSON.stringify(eventPayload)
   });
   if (!res.ok) throw new Error('Failed to trigger demo incident');
   return res.json();

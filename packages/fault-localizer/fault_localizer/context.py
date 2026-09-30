@@ -104,6 +104,19 @@ class ContextBuilder:
         self.repo_access = RepositoryAccess(repo_path)
         self.db_session = db_session
 
+    def close(self):
+        """Releases underlying repository handles."""
+        self.repo_access.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __del__(self):
+        self.close()
+
     async def build_context(
         self,
         incident_data: Dict[str, Any],
@@ -263,14 +276,19 @@ class ContextBuilder:
             "line": fault_location.get("line"),
             "function": fault_location.get("function"),
             "class": fault_location.get("class"),
+            "score": fault_location.get("score"),
+            "reasons": fault_location.get("reasons", []),
             "stack_frame": fault_location.get("stack_frame"),
             "recent_change": fault_location.get("recent_change"),
-            "evidence": fault_location.get("evidence")
+            "evidence": fault_location.get("evidence"),
+            "candidates": fault_location.get("candidates", []),
+            "fault_candidates": fault_location.get("fault_candidates", [])
         }
         
         return {
             "incident": incident_data,
             "fault_location": clean_fault_location,
+            "fault_candidates": fault_location.get("candidates", []),
             "source_context": source_context,
             "imports": imports,
             "related_tests": related_tests,
