@@ -116,6 +116,7 @@ class Repository(Base):
     project_id: Mapped[str] = mapped_column(String(50), ForeignKey("projects.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_synced_commit: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 

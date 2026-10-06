@@ -133,7 +133,8 @@ async def github_webhook(
                         organization_id=org_id,
                         project_id=db_project.id,
                         name=full_name,
-                        url=repo_url
+                        url=repo_url,
+                        status="active"
                     )
                     db.add(db_repo)
 

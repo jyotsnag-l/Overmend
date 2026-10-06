@@ -1119,6 +1119,7 @@ async def sync_repositories(
                         project_id=db_projects[0].id,
                         name=full_name,
                         url=repo_url,
+                        status="active",
                         last_synced_commit=latest_commit_sha
                     )
                     db.add(db_repo)
