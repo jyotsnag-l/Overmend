@@ -44,20 +44,21 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(Base.metadata.create_all)
             
             # Simple column addition checks for SQLite / PostgreSQL
-            for column, col_type in [
-                ("policy_version", "VARCHAR(50)"),
-                ("inputs", "JSON"),
-                ("actor_system", "VARCHAR(100)"),
-                ("policy_checks", "JSON"),
-                ("risk_flags", "JSON")
+            for table_name, column, col_type in [
+                ("decisions", "policy_version", "VARCHAR(50)"),
+                ("decisions", "inputs", "JSON"),
+                ("decisions", "actor_system", "VARCHAR(100)"),
+                ("decisions", "policy_checks", "JSON"),
+                ("decisions", "risk_flags", "JSON"),
+                ("repositories", "last_synced_commit", "VARCHAR(100)")
             ]:
                 try:
                     # In SQLite, JSON type is handled as TEXT, in Postgres as JSON.
-                    await conn.execute(text(f"ALTER TABLE decisions ADD COLUMN {column} {col_type}"))
-                    logger.info(f"Added column {column} to decisions table.")
+                    await conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column} {col_type}"))
+                    logger.info(f"Added column {column} to {table_name} table.")
                 except Exception as ex:
                     # Column likely already exists or table does not support it
-                    logger.debug(f"Column {column} check: {ex}")
+                    logger.debug(f"Column {column} check on {table_name}: {ex}")
         logger.info("Database tables verified/created successfully.")
     except Exception as e:
         logger.error(f"Error initializing database tables: {e}", exc_info=True)

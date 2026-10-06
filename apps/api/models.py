@@ -117,6 +117,7 @@ class Repository(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_synced_commit: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     organization = relationship("Organization", back_populates="repositories")
     project = relationship("Project", back_populates="repositories")

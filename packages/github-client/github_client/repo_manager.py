@@ -231,7 +231,7 @@ class RepositoryWorkspace:
 
     def cleanup(self) -> None:
         """Cleans up the temporary workspace directory."""
-        if not self._cleaned and os.path.exists(self.path):
+        if self.is_temporary and not self._cleaned and os.path.exists(self.path):
             cleanup_workspace(self.path)
             self._cleaned = True
 
@@ -300,10 +300,11 @@ class RepositoryManager:
         commit_sha: Optional[str] = None,
         ref: Optional[str] = None,
         incident_id: Optional[str] = None,
-        base_dir: Optional[str] = None
+        base_dir: Optional[str] = None,
+        target_dir: Optional[str] = None
     ) -> RepositoryWorkspace:
         """
-        Acquires a repository into a unique temporary workspace.
+        Acquires a repository into a unique temporary or specified target workspace.
 
         Args:
             repository: Repository identity (GitHub URL, owner/repository slug, or local directory path).
@@ -313,6 +314,7 @@ class RepositoryManager:
                  is resolved explicitly via GitHub API or git metadata (main is not blindly assumed).
             incident_id: Optional incident ID used to prefix and namespace the workspace.
             base_dir: Optional parent directory for the temporary workspace.
+            target_dir: Optional existing or specific workspace directory to reuse/prepare.
 
         Returns:
             RepositoryWorkspace: Object containing workspace path, commit SHA, and cleanup method.
@@ -327,22 +329,27 @@ class RepositoryManager:
             WorkspaceCreationError: Temporary directory creation failure.
         """
         norm_repo, is_local = parse_repository_identity(repository)
+        is_temporary = target_dir is None
 
-        # 1. Create unique temporary workspace
-        prefix_parts = ["overmend"]
-        if incident_id:
-            safe_inc = re.sub(r"[^a-zA-Z0-9_-]", "", incident_id)[:16]
-            prefix_parts.append(safe_inc)
-        prefix_parts.append(uuid.uuid4().hex[:8])
-        prefix = f"{'_'.join(prefix_parts)}_"
+        if target_dir:
+            workspace_dir = os.path.abspath(target_dir)
+            os.makedirs(workspace_dir, exist_ok=True)
+        else:
+            # 1. Create unique temporary workspace
+            prefix_parts = ["overmend"]
+            if incident_id:
+                safe_inc = re.sub(r"[^a-zA-Z0-9_-]", "", incident_id)[:16]
+                prefix_parts.append(safe_inc)
+            prefix_parts.append(uuid.uuid4().hex[:8])
+            prefix = f"{'_'.join(prefix_parts)}_"
 
-        target_base = base_dir or self.base_dir
-        try:
-            workspace_dir = tempfile.mkdtemp(prefix=prefix, dir=target_base)
-        except Exception as e:
-            raise WorkspaceCreationError(f"Failed to create temporary workspace: {e}") from e
+            target_base = base_dir or self.base_dir
+            try:
+                workspace_dir = tempfile.mkdtemp(prefix=prefix, dir=target_base)
+            except Exception as e:
+                raise WorkspaceCreationError(f"Failed to create temporary workspace: {e}") from e
 
-        # Ensure that if acquisition fails, the workspace directory is cleaned up
+        # Ensure that if acquisition fails, the temporary workspace directory is cleaned up
         acquired = False
         try:
             if is_local:
@@ -350,19 +357,21 @@ class RepositoryManager:
                     source_dir=norm_repo,
                     workspace_dir=workspace_dir,
                     commit_sha=commit_sha,
-                    ref=ref
+                    ref=ref,
+                    is_temporary=is_temporary
                 )
             else:
                 workspace = self._acquire_remote(
                     slug=norm_repo,
                     workspace_dir=workspace_dir,
                     commit_sha=commit_sha,
-                    ref=ref
+                    ref=ref,
+                    is_temporary=is_temporary
                 )
             acquired = True
             return workspace
         finally:
-            if not acquired:
+            if not acquired and is_temporary:
                 cleanup_workspace(workspace_dir)
 
     def _acquire_local(
@@ -370,25 +379,39 @@ class RepositoryManager:
         source_dir: str,
         workspace_dir: str,
         commit_sha: Optional[str] = None,
-        ref: Optional[str] = None
+        ref: Optional[str] = None,
+        is_temporary: bool = True
     ) -> RepositoryWorkspace:
         """
-        Copies a local repository into the temporary workspace without modifying
-        the original source directory.
+        Copies or prepares a local repository into the workspace directory.
+        If the target directory already exists with a git repository, cleans uncommitted
+        changes and updates git refs.
         """
         if not os.path.exists(source_dir):
             raise RepositoryNotFoundError(f"Local repository directory does not exist: {source_dir}")
 
-        logger.info(f"Copying local repository from {source_dir} to isolated workspace {workspace_dir}")
-        try:
-            shutil.copytree(source_dir, workspace_dir, dirs_exist_ok=True)
-        except Exception as e:
-            raise CloneError(f"Failed to copy local repository: {e}") from e
+        is_same_dir = os.path.abspath(source_dir) == os.path.abspath(workspace_dir)
+        is_existing_git = os.path.exists(os.path.join(workspace_dir, ".git"))
+
+        if is_existing_git:
+            logger.info(f"Target local git directory already exists at {workspace_dir}. Resetting uncommitted modifications...")
+            _run_git(["reset", "--hard", "HEAD"], cwd=workspace_dir)
+            _run_git(["clean", "-fdx"], cwd=workspace_dir)
+            remotes = _run_git(["remote"], cwd=workspace_dir)
+            if remotes.returncode == 0 and "origin" in remotes.stdout.split():
+                _run_git(["fetch", "--all", "--prune"], cwd=workspace_dir)
+        elif not is_same_dir:
+            logger.info(f"Copying local repository from {source_dir} to isolated workspace {workspace_dir}")
+            try:
+                shutil.copytree(source_dir, workspace_dir, dirs_exist_ok=True)
+            except Exception as e:
+                raise CloneError(f"Failed to copy local repository: {e}") from e
 
         is_git = os.path.exists(os.path.join(workspace_dir, ".git"))
         actual_sha = None
+        is_exact_commit = bool(commit_sha and commit_sha.strip() and commit_sha.strip().upper() != "HEAD")
 
-        if commit_sha:
+        if is_exact_commit:
             if not is_git:
                 parent_git_res = _run_git(["rev-parse", "--show-toplevel"], cwd=source_dir)
                 if parent_git_res.returncode == 0:
@@ -420,7 +443,6 @@ class RepositoryManager:
                         f"Workspace commit SHA '{actual_sha}' does not match requested commit '{commit_sha}'."
                     )
         elif ref:
-
             if not is_git:
                 raise CheckoutError(
                     f"Requested ref '{ref}', but local directory {source_dir} is not a git repository."
@@ -443,7 +465,8 @@ class RepositoryManager:
             repository=source_dir,
             commit_sha=actual_sha or commit_sha,
             ref=ref,
-            is_local_copy=True
+            is_local_copy=True,
+            is_temporary=is_temporary
         )
 
     def _acquire_remote(
@@ -451,10 +474,12 @@ class RepositoryManager:
         slug: str,
         workspace_dir: str,
         commit_sha: Optional[str] = None,
-        ref: Optional[str] = None
+        ref: Optional[str] = None,
+        is_temporary: bool = True
     ) -> RepositoryWorkspace:
         """
-        Clones a remote GitHub repository into the temporary workspace.
+        Clones or fetches a remote GitHub repository into the workspace directory.
+        If the target directory already exists, runs fetch and checkout.
         """
         client = self._get_github_client()
 
@@ -465,8 +490,7 @@ class RepositoryManager:
             or is_mock_slug
             or os.getenv("GITHUB_MOCK", "false").lower() == "true"
         ):
-            return self._acquire_mock(slug, workspace_dir, commit_sha, ref)
-
+            return self._acquire_mock(slug, workspace_dir, commit_sha, ref, is_temporary=is_temporary)
 
         # 1. Authenticate with GitHub App installation
         auth_token = None
@@ -481,8 +505,9 @@ class RepositoryManager:
             clone_url = f"https://github.com/{slug}.git"
 
         # 2. Determine target ref if commit_sha is not provided
+        is_exact_commit = bool(commit_sha and commit_sha.strip() and commit_sha.strip().upper() != "HEAD")
         target_ref = ref
-        if not commit_sha and not target_ref:
+        if not is_exact_commit and not target_ref:
             try:
                 meta = client.get_repo_metadata(slug)
                 target_ref = meta.get("default_branch")
@@ -490,34 +515,43 @@ class RepositoryManager:
                 logger.warning(f"Could not retrieve repository metadata for {slug}: {meta_err}")
 
             if not target_ref:
-                raise InvalidRepositoryError(
-                    f"No commit_sha or ref was provided for repository '{slug}', "
-                    "and the default branch could not be resolved from GitHub API."
-                )
+                target_ref = "main"
 
-        # 3. Clone repository
-        clone_cmd = ["clone"]
-        if not commit_sha and target_ref:
-            clone_cmd.extend(["--branch", target_ref, "--single-branch"])
+        # 3. Clone or update repository
+        already_cloned = os.path.exists(os.path.join(workspace_dir, ".git"))
+        if already_cloned:
+            logger.info(f"Target repository already exists at {workspace_dir}. Resetting uncommitted modifications and fetching updates...")
+            # Clean and reset any uncommitted modifications
+            _run_git(["reset", "--hard", "HEAD"], cwd=workspace_dir)
+            _run_git(["clean", "-fdx"], cwd=workspace_dir)
 
-        clone_cmd.extend([clone_url, workspace_dir])
+            # Run git fetch --all --prune
+            fetch_res = _run_git(["fetch", "--all", "--prune"], cwd=workspace_dir)
+            if fetch_res.returncode != 0:
+                logger.warning(f"git fetch --all --prune warning: {_scrub_sensitive(fetch_res.stderr.strip())}")
+        else:
+            clone_cmd = ["clone"]
+            if not is_exact_commit and target_ref:
+                clone_cmd.extend(["--branch", target_ref])
 
-        logger.info(f"Cloning GitHub repository {slug} into {workspace_dir}...")
-        res = _run_git(clone_cmd)
-        if res.returncode != 0:
-            err_output = _scrub_sensitive(res.stderr.strip())
-            if "Repository not found" in err_output or "404" in err_output:
-                raise RepositoryNotFoundError(f"Repository '{slug}' not found on GitHub: {err_output}")
-            if "Authentication failed" in err_output or "401" in err_output or "403" in err_output:
-                raise AuthenticationError(f"GitHub authentication failed for '{slug}': {err_output}")
-            raise CloneError(f"Failed to clone repository '{slug}': {err_output}")
+            clone_cmd.extend([clone_url, workspace_dir])
 
-        # 4. Checkout and verify exact commit SHA
+            logger.info(f"Cloning GitHub repository {slug} into {workspace_dir}...")
+            res = _run_git(clone_cmd)
+            if res.returncode != 0:
+                err_output = _scrub_sensitive(res.stderr.strip())
+                if "Repository not found" in err_output or "404" in err_output:
+                    raise RepositoryNotFoundError(f"Repository '{slug}' not found on GitHub: {err_output}")
+                if "Authentication failed" in err_output or "401" in err_output or "403" in err_output:
+                    raise AuthenticationError(f"GitHub authentication failed for '{slug}': {err_output}")
+                raise CloneError(f"Failed to clone repository '{slug}': {err_output}")
+
+        # 4. Checkout and verify exact commit SHA or latest remote HEAD
         actual_sha = None
-        if commit_sha:
+        if is_exact_commit:
             checkout_res = _run_git(["checkout", commit_sha], cwd=workspace_dir)
             if checkout_res.returncode != 0:
-                # Attempt to fetch commit directly in case of shallow clone or unreferenced commit
+                # Attempt to fetch commit directly in case of unreferenced commit
                 _run_git(["fetch", "origin", commit_sha], cwd=workspace_dir)
                 checkout_res = _run_git(["checkout", commit_sha], cwd=workspace_dir)
 
@@ -537,6 +571,14 @@ class RepositoryManager:
                     f"Workspace HEAD commit '{actual_sha}' does not match requested commit '{commit_sha}'."
                 )
         else:
+            # If no commit_sha is provided (or if it is null/empty/"HEAD"), dynamically resolve the latest remote HEAD
+            # of the default branch (origin/<default_branch>) and checkout the latest commit instead of leaving it on an outdated local branch ref.
+            default_branch = target_ref or "main"
+            co_res = _run_git(["checkout", "-B", default_branch, f"origin/{default_branch}"], cwd=workspace_dir)
+            if co_res.returncode != 0:
+                _run_git(["checkout", f"origin/{default_branch}"], cwd=workspace_dir)
+            _run_git(["reset", "--hard", f"origin/{default_branch}"], cwd=workspace_dir)
+
             verify_res = _run_git(["rev-parse", "HEAD"], cwd=workspace_dir)
             if verify_res.returncode == 0:
                 actual_sha = verify_res.stdout.strip()
@@ -545,7 +587,8 @@ class RepositoryManager:
             path=workspace_dir,
             repository=slug,
             commit_sha=actual_sha or commit_sha,
-            ref=target_ref
+            ref=target_ref,
+            is_temporary=is_temporary
         )
 
     def _acquire_mock(
@@ -553,27 +596,33 @@ class RepositoryManager:
         slug: str,
         workspace_dir: str,
         commit_sha: Optional[str] = None,
-        ref: Optional[str] = None
+        ref: Optional[str] = None,
+        is_temporary: bool = True
     ) -> RepositoryWorkspace:
         """
         Creates a simulated local git repository for testing and offline development.
         """
         logger.info(f"Initializing simulated repository workspace for {slug} at {workspace_dir}")
-        _run_git(["init"], cwd=workspace_dir)
-        _run_git(["config", "user.name", "Overmend Bot"], cwd=workspace_dir)
-        _run_git(["config", "user.email", "bot@overmend.local"], cwd=workspace_dir)
+        is_existing_git = os.path.exists(os.path.join(workspace_dir, ".git"))
+        if is_existing_git:
+            _run_git(["reset", "--hard", "HEAD"], cwd=workspace_dir)
+            _run_git(["clean", "-fdx"], cwd=workspace_dir)
+        else:
+            _run_git(["init"], cwd=workspace_dir)
+            _run_git(["config", "user.name", "Overmend Bot"], cwd=workspace_dir)
+            _run_git(["config", "user.email", "bot@overmend.local"], cwd=workspace_dir)
 
-        # Create basic structure
-        src_file = os.path.join(workspace_dir, "main.py")
-        with open(src_file, "w", encoding="utf-8") as f:
-            f.write("# Overmend simulated repository workspace\ndef entrypoint():\n    return True\n")
+            # Create basic structure
+            src_file = os.path.join(workspace_dir, "main.py")
+            with open(src_file, "w", encoding="utf-8") as f:
+                f.write("# Overmend simulated repository workspace\ndef entrypoint():\n    return True\n")
 
-        _run_git(["add", "main.py"], cwd=workspace_dir)
-        _run_git(["commit", "-m", "Initial mock commit"], cwd=workspace_dir)
+            _run_git(["add", "main.py"], cwd=workspace_dir)
+            _run_git(["commit", "-m", "Initial mock commit"], cwd=workspace_dir)
 
         # If a branch was requested, checkout or create it
         if ref and ref != "HEAD":
-            _run_git(["checkout", "-b", ref], cwd=workspace_dir)
+            _run_git(["checkout", "-B", ref], cwd=workspace_dir)
 
         actual_sha = None
         verify_res = _run_git(["rev-parse", "HEAD"], cwd=workspace_dir)
@@ -581,14 +630,15 @@ class RepositoryManager:
             actual_sha = verify_res.stdout.strip()
 
         # If an exact commit SHA was requested, simulate that commit if needed
-        if commit_sha:
+        if commit_sha and commit_sha != "HEAD":
             actual_sha = commit_sha
 
         return RepositoryWorkspace(
             path=workspace_dir,
             repository=slug,
             commit_sha=actual_sha or commit_sha,
-            ref=ref
+            ref=ref,
+            is_temporary=is_temporary
         )
 
     def cleanup(self, workspace_or_path: Union[RepositoryWorkspace, str]) -> None:

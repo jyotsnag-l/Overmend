@@ -227,6 +227,7 @@ export interface Repository {
   name: string;
   url: string;
   created_at: string;
+  last_synced_commit?: string;
   health_percentage?: number;
   active_incidents?: number;
   total_incidents?: number;
@@ -378,7 +379,7 @@ export async function triggerDemoIncident(
 ): Promise<Incident> {
   const projectId = 'proj_04102d07';
   const repoName = 'jyotsnag-l/recovery-test-repo';
-  const targetCommit = commitSha || 'a9ca1cde1290cffc76efaea7d4eba107765ebf43';
+  const targetCommit = commitSha || undefined;
 
   // 1. Ensure project exists
   await fetch(`${API_URL}/api/v1/projects`, {
@@ -410,12 +411,15 @@ AssertionError: assert 201 == 400
     exception_message: excMsg,
     stack_trace: realStackTrace,
     environment: 'production',
-    git_commit: targetCommit,
-    commit_sha: targetCommit,
     file: targetFile,
     line: targetLine,
     function: 'validate_stock_availability'
   };
+
+  if (targetCommit) {
+    eventPayload.git_commit = targetCommit;
+    eventPayload.commit_sha = targetCommit;
+  }
 
   // 2. Post SDK Ingestion event
   const res = await fetch(`${API_URL}/api/v1/events`, {
