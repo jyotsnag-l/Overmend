@@ -300,3 +300,55 @@ def test_token_scrubbing_in_errors():
     error_text = str(exc_info.value)
     # The actual token must NOT appear in the exception message
     assert "ghs_SUPER_SECRET_TOKEN_99999" not in error_text
+
+
+def test_existing_workspace_reset_and_preparation(local_git_repo, tmp_path):
+    """Verifies that an existing workspace directory is cleaned of uncommitted edits before checkout."""
+    manager = RepositoryManager()
+    target_ws = str(tmp_path / "cached_workspace")
+
+    # First acquisition into explicit target_dir
+    ws1 = manager.acquire(local_git_repo["path"], commit_sha=local_git_repo["sha1"], target_dir=target_ws)
+    assert os.path.exists(target_ws)
+    assert ws1.commit_sha == local_git_repo["sha1"]
+
+    # Dirty the workspace with uncommitted modifications and an untracked file
+    dirty_file = os.path.join(target_ws, "app.py")
+    with open(dirty_file, "w", encoding="utf-8") as f:
+        f.write("# DIRTY MODIFICATION\n")
+    untracked_file = os.path.join(target_ws, "untracked.tmp")
+    with open(untracked_file, "w", encoding="utf-8") as f:
+        f.write("temporary file")
+
+    # Re-acquire into the same existing workspace for sha2
+    ws2 = manager.acquire(local_git_repo["path"], commit_sha=local_git_repo["sha2"], target_dir=target_ws)
+    assert ws2.commit_sha == local_git_repo["sha2"]
+    assert not os.path.exists(untracked_file)
+    with open(dirty_file, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "# DIRTY MODIFICATION" not in content
+    assert "'v2'" in content
+
+
+def test_dynamic_head_resolution(local_git_repo):
+    """Verifies that omiting commit_sha or passing HEAD resolves to the latest commit dynamically."""
+    manager = RepositoryManager()
+
+    # None commit_sha
+    with manager.acquire(local_git_repo["path"], commit_sha=None) as ws:
+        assert ws.commit_sha == local_git_repo["sha2"]
+
+    # 'HEAD' commit_sha
+    with manager.acquire(local_git_repo["path"], commit_sha="HEAD") as ws:
+        assert ws.commit_sha == local_git_repo["sha2"]
+
+
+def test_target_dir_not_deleted_on_cleanup(local_git_repo, tmp_path):
+    """Verifies that custom target_dir workspaces are not wiped by cleanup."""
+    manager = RepositoryManager()
+    target_ws = str(tmp_path / "persistent_workspace")
+
+    ws = manager.acquire(local_git_repo["path"], target_dir=target_ws)
+    assert os.path.exists(target_ws)
+    ws.cleanup()
+    assert os.path.exists(target_ws)

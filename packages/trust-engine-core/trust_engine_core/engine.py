@@ -26,6 +26,38 @@ def _resolve_test_command(cmd: str) -> str:
         return f'"{python_exe}" -m pytest ' + " ".join(parts[1:])
     return cmd
 
+def fix_hunk_headers(text: str) -> str:
+    import re
+    lines = text.splitlines(keepends=True)
+    out_lines = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$", line)
+        if m:
+            s_start, t_start, rest = m.group(1), m.group(2), m.group(3)
+            j = i + 1
+            s_count = 0
+            t_count = 0
+            while j < len(lines):
+                hl = lines[j]
+                if hl.startswith("@@ ") or hl.startswith("diff --git"):
+                    break
+                if hl.startswith(" ") or hl.startswith("\\"):
+                    s_count += 1
+                    t_count += 1
+                elif hl.startswith("-"):
+                    s_count += 1
+                elif hl.startswith("+"):
+                    t_count += 1
+                j += 1
+            out_lines.append(f"@@ -{s_start},{s_count} +{t_start},{t_count} @@{rest}\n")
+            i += 1
+        else:
+            out_lines.append(line)
+            i += 1
+    return "".join(out_lines)
+
 def _apply_patch(temp_repo_dir: str, patch_diff: str) -> bool:
     """
     Initializes a git repository if not present, and applies the unified patch.
@@ -40,14 +72,16 @@ def _apply_patch(temp_repo_dir: str, patch_diff: str) -> bool:
             subprocess.run(["git", "add", "."], cwd=temp_repo_dir, check=True, capture_output=True)
             subprocess.run(["git", "commit", "-m", "initial commit"], cwd=temp_repo_dir, check=True, capture_output=True)
 
+        normalized_diff = fix_hunk_headers(patch_diff.strip() + "\n")
+
         # Write patch to a temporary file
         patch_file = os.path.join(temp_repo_dir, "temp_patch.diff")
-        with open(patch_file, "w", encoding="utf-8", newline="") as f:
-            f.write(patch_diff)
+        with open(patch_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(normalized_diff)
 
-        # Apply patch
+        # Apply patch with recount and whitespace resilience
         res = subprocess.run(
-            ["git", "apply", "--ignore-space-change", "--whitespace=nowarn", "temp_patch.diff"],
+            ["git", "apply", "--ignore-space-change", "--whitespace=nowarn", "--recount", "temp_patch.diff"],
             cwd=temp_repo_dir,
             capture_output=True,
             text=True
@@ -292,15 +326,6 @@ def evaluate_patch(
         evaluation_results = scorer.calculate_score(inputs)
 
         # Save to DB asynchronously (wait, we run it synchronously here since evaluate_patch is synchronous)
-        # But we do import and run persistence
-        import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Run persistence task asynchronously in background or block
-            # Since evaluate_patch is called in Celery or FastAPI async context, we run it synchronously
-            # by executing it in a new event loop or using run_until_complete if we are in thread/sync context
-            pass
-        
         # To avoid nest_asyncio complications, we define a small synchronous run wrapper
         def run_sync(coro):
             try:

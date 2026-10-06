@@ -188,9 +188,27 @@ async def create_incident(
     fingerprint_str = f"{incident.exception_type}:{incident.exception_message[:100]}"
 
     context = dict(incident.context or {})
-    if getattr(incident, "commit_sha", None):
-        context["commit_sha"] = incident.commit_sha
-        context["git_commit"] = incident.commit_sha
+    explicit_commit = getattr(incident, "commit_sha", None) or context.get("commit_sha") or context.get("git_commit")
+    if explicit_commit and str(explicit_commit).strip().upper() != "HEAD":
+        commit_sha = str(explicit_commit).strip()
+    else:
+        # Dynamically query GitHub for the latest commit SHA of the repository's default branch
+        commit_sha = None
+        repo_name = project.repository
+        if repo_name:
+            try:
+                from github_client.client import GitHubAppClient
+                app_id = settings.GITHUB_APP_ID or os.getenv("GITHUB_APP_ID", "mock")
+                private_key = settings.GITHUB_PRIVATE_KEY or os.getenv("GITHUB_PRIVATE_KEY", "mock")
+                installation_id = settings.GITHUB_INSTALLATION_ID or os.getenv("GITHUB_INSTALLATION_ID")
+                client = GitHubAppClient(app_id=app_id, private_key=private_key, installation_id=installation_id)
+                commit_sha = client.get_latest_commit_sha(repo_name)
+            except Exception as e:
+                logger.warning(f"Could not resolve dynamic latest commit SHA for {repo_name}: {e}")
+
+    if commit_sha:
+        context["commit_sha"] = commit_sha
+        context["git_commit"] = commit_sha
 
     db_incident = models.Incident(
         id=f"inc_{uuid.uuid4().hex[:8]}",
@@ -1004,6 +1022,7 @@ async def list_repositories(
             "name": r.name,
             "url": r.url,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            "last_synced_commit": r.last_synced_commit,
             "health_percentage": health_pct,
             "active_incidents": active_count,
             "total_incidents": total_count,
@@ -1020,6 +1039,7 @@ async def sync_repositories(
 ):
     """
     Sync repositories from the configured GitHub App installation into the organization.
+    Queries the GitHub API for the latest default branch commit hash and updates last_synced_commit.
     """
     org_id = membership.organization_id
     app_id = settings.GITHUB_APP_ID or os.getenv("GITHUB_APP_ID")
@@ -1036,6 +1056,14 @@ async def sync_repositories(
                 full_name = gh_repo.get("full_name") or gh_repo.get("name")
                 repo_url = gh_repo.get("html_url") or f"https://github.com/{full_name}"
                 repo_name = gh_repo.get("name")
+                default_branch = gh_repo.get("default_branch") or "main"
+                
+                # Dynamically query GitHub for the latest commit SHA of default branch
+                latest_commit_sha = None
+                try:
+                    latest_commit_sha = client.get_latest_commit_sha(full_name, default_branch)
+                except Exception as commit_err:
+                    logger.warning(f"Failed to query latest commit SHA for {full_name}: {commit_err}")
                 
                 # Check if Project exists for this repo in org
                 proj_res = await db.execute(
@@ -1043,8 +1071,8 @@ async def sync_repositories(
                     .where(models.Project.organization_id == org_id)
                     .where(models.Project.repository == full_name)
                 )
-                db_project = proj_res.scalar_one_or_none()
-                if not db_project:
+                db_projects = proj_res.scalars().all()
+                if not db_projects:
                     proj_id = f"proj_{uuid.uuid4().hex[:8]}"
                     db_project = models.Project(
                         id=proj_id,
@@ -1054,6 +1082,7 @@ async def sync_repositories(
                     )
                     db.add(db_project)
                     await db.flush()
+                    db_projects = [db_project]
 
                     # Create default policy
                     db_policy = models.ProjectPolicy(
@@ -1076,25 +1105,28 @@ async def sync_repositories(
                     )
                     db.add(db_env)
 
-                # Check if Repository record exists
+                # Check if Repository records exist
                 repo_res = await db.execute(
                     select(models.Repository)
                     .where(models.Repository.organization_id == org_id)
                     .where(models.Repository.name == full_name)
                 )
-                db_repo = repo_res.scalar_one_or_none()
-                if not db_repo:
+                existing_repos = repo_res.scalars().all()
+                if not existing_repos:
                     db_repo = models.Repository(
                         id=f"repo_{uuid.uuid4().hex[:8]}",
                         organization_id=org_id,
-                        project_id=db_project.id,
+                        project_id=db_projects[0].id,
                         name=full_name,
-                        url=repo_url
+                        url=repo_url,
+                        last_synced_commit=latest_commit_sha
                     )
                     db.add(db_repo)
                 else:
-                    db_repo.url = repo_url
-                    db_repo.project_id = db_project.id
+                    for db_repo in existing_repos:
+                        db_repo.url = repo_url
+                        if latest_commit_sha:
+                            db_repo.last_synced_commit = latest_commit_sha
 
             await db.commit()
             logger.info(f"Successfully synced {len(gh_repos)} repositories from GitHub for org {org_id}")

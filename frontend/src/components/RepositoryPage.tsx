@@ -251,8 +251,13 @@ export default function RepositoryPage() {
                           </div>
                           
                           <div className="flex justify-between items-center text-[10px] font-mono text-[#64748B] pt-1.5 border-t border-[#E2E8F0]">
-                            <span className="flex items-center">
-                              <GitBranch className="h-3 w-3 mr-1 text-stone-400" /> main
+                            <span className="flex items-center space-x-1.5">
+                              <span className="flex items-center"><GitBranch className="h-3 w-3 mr-1 text-stone-400" /> main</span>
+                              {repo.last_synced_commit && (
+                                <span className="bg-[#F1F5F9] text-[#475569] px-1.5 py-0.5 rounded text-[9px] font-mono font-medium">
+                                  {repo.last_synced_commit.slice(0, 7)}
+                                </span>
+                              )}
                             </span>
                             <span className={hasActive ? 'text-amber-600 font-semibold' : 'text-[#059669] font-semibold'}>
                               {hasActive 

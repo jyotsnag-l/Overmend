@@ -149,12 +149,44 @@ async def seed_database_if_needed():
             db.add(policy)
         await db.commit()
 
-def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
+def resolve_demo_commit(repo_path: str = None, explicit_commit: str = None) -> str:
+    if explicit_commit and explicit_commit.strip().upper() != "HEAD":
+        return explicit_commit.strip()
+
+    search_paths = []
+    if repo_path:
+        search_paths.append(os.path.abspath(repo_path))
+    search_paths.extend([
+        os.path.abspath(os.path.join(root_dir, "demo-repo")),
+        os.path.abspath("C:/Users/sreej/OneDrive/Desktop/test/recovery-test-repo"),
+        os.path.abspath(root_dir)
+    ])
+    for p in search_paths:
+        if os.path.exists(p) and os.path.exists(os.path.join(p, ".git")):
+            try:
+                import git
+                return git.Repo(p).head.commit.hexsha
+            except Exception:
+                pass
+            try:
+                import subprocess
+                res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=p, capture_output=True, text=True)
+                if res.returncode == 0 and res.stdout.strip():
+                    return res.stdout.strip()
+            except Exception:
+                pass
+    return "HEAD"
+
+def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True, repo_path: str = None, commit_sha: str = None):
+    target_repo = repo_path or os.path.join(root_dir, "demo-repo")
+    resolved_commit = resolve_demo_commit(repo_path=target_repo, explicit_commit=commit_sha)
+
     print("\n" + "="*80)
     print(f"{Colors.BOLD}{Colors.HEADER} AUTONOMOUS SOFTWARE RECOVERY & TRUST PAAS — 8-STEP PIPELINE DEMO{Colors.RESET}")
     print("="*80)
     print(f" {Colors.CYAN}Target Scenario:{Colors.RESET} {scenario_data['title']}")
-    print(f" {Colors.CYAN}Repository:{Colors.RESET}      demo-repo | Source: {scenario_data['file']}:{scenario_data['line']}")
+    print(f" {Colors.CYAN}Repository:{Colors.RESET}      {target_repo} | Source: {scenario_data['file']}:{scenario_data['line']}")
+    print(f" {Colors.CYAN}Commit SHA:{Colors.RESET}      {resolved_commit}")
     print(f" {Colors.CYAN}Execution Mode:{Colors.RESET}  High-Speed Pipeline (< 1.5 sec)")
     print("="*80 + "\n")
 
@@ -182,7 +214,14 @@ def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
                 exception_message=scenario_data["exception_message"],
                 stack_trace=scenario_data["stack_trace"],
                 environment="production",
-                context={"repository": "demo-repo", "module": scenario_data["file"]}
+                git_commit=resolved_commit,
+                commit_sha=resolved_commit,
+                context={
+                    "repository": "demo-repo",
+                    "module": scenario_data["file"],
+                    "git_commit": resolved_commit,
+                    "commit_sha": resolved_commit
+                }
             )
             incident = await pipeline.process_event_pipeline(db, event, project)
             return incident.id, incident.status, incident.severity, incident.fingerprint
@@ -199,7 +238,7 @@ def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
     t0 = time.perf_counter()
     import fault_localizer
     async def localize_fault():
-        fault = fault_localizer.localize_fault(scenario_data["stack_trace"], repo_path=os.path.join(root_dir, "demo-repo"))
+        fault = fault_localizer.localize_fault(scenario_data["stack_trace"], repo_path=target_repo)
         async with AsyncSessionLocal() as db:
             inc_res = await db.execute(select(models.Incident).where(models.Incident.id == incident_id))
             inc = inc_res.scalar_one()
@@ -221,7 +260,7 @@ def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
     # Step 3: Patch Generation
     t0 = time.perf_counter()
     from tasks import generate_and_store_patches  # type: ignore
-    candidates = asyncio.run(generate_and_store_patches(incident_id, os.path.join(root_dir, "demo-repo"), fault))
+    candidates = asyncio.run(generate_and_store_patches(incident_id, target_repo, fault))
     dur3 = (time.perf_counter() - t0) * 1000
     print(f"{Colors.BOLD}{Colors.GREEN}[3/8] STAGE 3: MULTI-CANDIDATE PATCH GENERATION{Colors.RESET} {Colors.DIM}({dur3:.1f}ms){Colors.RESET}")
     print(f"      ├─ Synthesis:      Parallel LLM / Rule Synthesis ({len(candidates)} candidates generated)")
@@ -233,7 +272,7 @@ def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
     # Step 4: Sandbox Execution
     t0 = time.perf_counter()
     import tasks  # type: ignore
-    result = tasks.run_recovery_pipeline(incident_id, "demo-repo", scenario_data["stack_trace"])
+    result = tasks.run_recovery_pipeline(incident_id, "demo-repo", scenario_data["stack_trace"], resolved_commit)
     dur4 = (time.perf_counter() - t0) * 1000
 
     print(f"{Colors.BOLD}{Colors.GREEN}[4/8] STAGE 4: ISOLATED SANDBOX EXECUTION{Colors.RESET} {Colors.DIM}({dur4:.1f}ms){Colors.RESET}")
@@ -281,6 +320,8 @@ def run_pipeline_demo(scenario_data: dict, fast_mode: bool = True):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trigger error and run 8-step Autonomous Recovery PaaS demo")
     parser.add_argument("--scenario", choices=["payments", "users", "orders"], default=None, help="Error scenario to ingest")
+    parser.add_argument("--repo-path", dest="repo_path", default=None, help="Path to target local repository")
+    parser.add_argument("--commit", dest="commit", default=None, help="Target commit SHA (defaults to dynamic HEAD)")
     args = parser.parse_args()
 
     if args.scenario:
@@ -299,4 +340,4 @@ if __name__ == "__main__":
             choice = "1"
         scenario_data = SCENARIOS.get(choice, SCENARIOS["1"])
 
-    run_pipeline_demo(scenario_data)
+    run_pipeline_demo(scenario_data, repo_path=args.repo_path, commit_sha=args.commit)

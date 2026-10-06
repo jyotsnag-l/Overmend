@@ -2,8 +2,11 @@ import os
 import time
 import hmac
 import hashlib
+import logging
 import requests
 from typing import Optional, Dict, Any, List
+
+logger = logging.getLogger("github_client.client")
 
 try:
     import jwt
@@ -211,6 +214,24 @@ class GitHubAppClient:
         response = requests.get(url, headers=self._headers())
         response.raise_for_status()
         return response.json()
+
+    def get_latest_commit_sha(self, repo: str, branch: Optional[str] = None) -> str:
+        """
+        Dynamically queries GitHub for the latest commit SHA of a branch or default branch.
+        """
+        if self.mock:
+            return "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        try:
+            target_branch = branch
+            if not target_branch:
+                meta = self.get_repo_metadata(repo)
+                target_branch = meta.get("default_branch", "main")
+            branch_data = self.get_branch(repo, target_branch)
+            commit_info = branch_data.get("commit", {})
+            return commit_info.get("sha", "")
+        except Exception as e:
+            logger.warning(f"Failed to query latest commit SHA for {repo} ({branch}): {e}")
+            return ""
 
     def get_commit(self, repo: str, commit_sha: str) -> Dict[str, Any]:
         if self.mock:

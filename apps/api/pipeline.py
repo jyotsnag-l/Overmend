@@ -351,7 +351,23 @@ async def process_event_pipeline(
     affected_project = project.id
     
     # Extract metadata details
-    commit_hash = event.commit_sha or event.git_commit
+    explicit_commit = event.commit_sha or event.git_commit
+    if explicit_commit and str(explicit_commit).strip().upper() != "HEAD":
+        commit_hash = str(explicit_commit).strip()
+    else:
+        commit_hash = None
+        if affected_repository:
+            try:
+                from github_client.client import GitHubAppClient
+                from config import settings
+                app_id = settings.GITHUB_APP_ID or os.getenv("GITHUB_APP_ID", "mock")
+                private_key = settings.GITHUB_PRIVATE_KEY or os.getenv("GITHUB_PRIVATE_KEY", "mock")
+                installation_id = settings.GITHUB_INSTALLATION_ID or os.getenv("GITHUB_INSTALLATION_ID")
+                client = GitHubAppClient(app_id=app_id, private_key=private_key, installation_id=installation_id)
+                commit_hash = client.get_latest_commit_sha(affected_repository)
+            except Exception as e:
+                logger.warning(f"Could not resolve dynamic latest commit SHA for {affected_repository}: {e}")
+
     context_data = {
         "file": event.file,
         "line": event.line,
