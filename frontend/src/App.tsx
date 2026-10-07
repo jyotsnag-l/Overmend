@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
-import { 
-  Activity, AlertTriangle, AlertCircle, LayoutDashboard, 
+import {
+  Activity, AlertTriangle, AlertCircle, LayoutDashboard,
   ShieldCheck, Settings2, BarChart2, GitFork, PlaySquare,
   Lock, Check, X, Sparkles
 } from 'lucide-react';
 
 // API & Components Imports
-import { 
-  fetchHealth, HealthStatus, SIMULATED_PROFILES, getSimulatedProfile, setSimulatedProfile, triggerDemoIncident 
+import {
+  fetchHealth, HealthStatus, SIMULATED_PROFILES, getSimulatedProfile, setSimulatedProfile, triggerDemoIncident
 } from './api';
-import { 
-  ROLE_CONFIGS, canTriggerIncidents, UserRole, PERMISSION_MATRIX 
+import {
+  ROLE_CONFIGS, canTriggerIncidents, UserRole, PERMISSION_MATRIX
 } from './permissions';
 import LandingPage from './components/LandingPage';
 import DashboardPage from './components/DashboardPage';
@@ -112,10 +112,10 @@ export default function App() {
         return <IncidentDetailPage incidentId={pageParams.incidentId} onNavigate={handleNavigate} />;
       case 'PatchComparison':
         return (
-          <PatchComparisonPage 
-            incidentId={pageParams.incidentId} 
-            activePatchId={pageParams.activePatchId} 
-            onNavigate={handleNavigate} 
+          <PatchComparisonPage
+            incidentId={pageParams.incidentId}
+            activePatchId={pageParams.activePatchId}
+            onNavigate={handleNavigate}
           />
         );
       case 'Sandbox':
@@ -164,7 +164,7 @@ export default function App() {
           </div>
 
           <div className="relative hidden md:block w-80 lg:w-96">
-            <input 
+            <input
               type="text"
               placeholder="Search incidents, repos, stack traces..."
               className="w-full bg-[#F1F5F9] border border-[#CBD5E1] rounded-full px-5 py-2.5 text-sm text-[#0F172A] placeholder-stone-400 focus:outline-none focus:border-[#4F46E5] shadow-xs transition"
@@ -201,7 +201,7 @@ export default function App() {
               <span>{triggering ? 'Ingesting...' : '+ Ingest Fail Event'}</span>
             </button>
           ) : (
-            <div 
+            <div
               title="Action Restricted: Viewer role is Read-Only."
               className="flex items-center space-x-2 px-5 py-2.5 bg-[#F1F5F9] border border-[#CBD5E1] text-stone-400 rounded-full text-xs font-bold cursor-not-allowed"
             >
@@ -240,17 +240,16 @@ export default function App() {
               <nav className="space-y-1.5">
                 {menuItems.map((item) => {
                   const Icon = item.icon;
-                  const isActive = currentPage === item.name || 
+                  const isActive = currentPage === item.name ||
                     (item.name === 'Incidents' && (currentPage === 'IncidentDetail' || currentPage === 'PatchComparison' || currentPage === 'Sandbox' || currentPage === 'Trust'));
                   return (
                     <button
                       key={item.name}
                       onClick={() => handleNavigate(item.name)}
-                      className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-bold transition-all ${
-                        isActive 
-                          ? 'bg-[#4F46E5] text-white shadow-sm' 
+                      className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isActive
+                          ? 'bg-[#4F46E5] text-white shadow-sm'
                           : 'text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#0F172A]'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center space-x-3.5">
                         <Icon className={`h-5 w-5 ${isActive ? 'text-white' : 'text-[#64748B]'}`} />
@@ -314,7 +313,7 @@ export default function App() {
                 </h3>
                 <p className="text-xs text-[#64748B] mt-0.5 font-sans">Multi-tenant role boundaries and authorization governance</p>
               </div>
-              <button 
+              <button
                 onClick={() => setShowRbacModal(false)}
                 className="p-1 text-[#64748B] hover:text-[#0F172A] rounded hover:bg-[#F1F5F9]"
               >

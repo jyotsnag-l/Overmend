@@ -341,6 +341,27 @@ export async function createDecision(patchCandidateId: string, status: 'APPROVED
   return res.json();
 }
 
+export async function applyPatchCandidateAndCreatePR(candidateId: string): Promise<{
+  status: string;
+  incident_id: string;
+  patch_candidate_id: string;
+  repository: string;
+  branch_name: string;
+  pull_request_number: number;
+  pull_request_url: string;
+}> {
+  const res = await fetch(`${API_URL}/api/v1/patch-candidates/${candidateId}/apply-pr`, {
+    method: 'POST',
+    headers: getHeaders()
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to apply patch and create recovery PR');
+  }
+  return res.json();
+}
+
+
 export async function evaluateDecision(payload: {
   patch_candidate_id: string;
   trust_score: number;
@@ -433,3 +454,30 @@ AssertionError: assert 201 == 400
   if (!res.ok) throw new Error('Failed to trigger demo incident');
   return res.json();
 }
+
+/**
+ * Parses UTC ISO timestamp strings from backend SQLite/PostgreSQL accurately,
+ * ensuring naive UTC strings (without 'Z' or offset) are correctly treated as UTC
+ * and converted to the user's local timezone.
+ */
+export function parseUtcDate(dateStr: string | Date): Date {
+  if (!dateStr) return new Date();
+  if (dateStr instanceof Date) return dateStr;
+  let str = String(dateStr).trim();
+  if (!str.endsWith('Z') && !str.includes('+') && !str.includes('Z')) {
+    str = str.replace(' ', 'T') + 'Z';
+  }
+  return new Date(str);
+}
+
+export function formatDateTime(dateStr: string | Date): string {
+  const d = parseUtcDate(dateStr);
+  return d.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+

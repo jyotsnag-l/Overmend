@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { 
-  Database, RefreshCw, AlertTriangle, Users, Search, 
+import {
+  Database, RefreshCw, AlertTriangle, Users, Search,
   Layers, Clock
 } from 'lucide-react';
-import { 
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend 
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend
 } from 'recharts';
-import { listAuditLogs, AuditLog, fetchIncidents, Incident, SIMULATED_PROFILES, getSimulatedProfile, setSimulatedProfile } from '../api';
+import { listAuditLogs, AuditLog, fetchIncidents, Incident, SIMULATED_PROFILES, getSimulatedProfile, setSimulatedProfile, formatDateTime } from '../api';
 import { ROLE_CONFIGS, UserRole } from '../permissions';
 
 export default function OrganizationPage() {
@@ -118,7 +118,7 @@ export default function OrganizationPage() {
             </button>
           </div>
 
-          <button 
+          <button
             onClick={() => { setLoading(true); loadData(); }}
             className="btn-dark p-2 text-[#64748B]"
           >
@@ -147,7 +147,7 @@ export default function OrganizationPage() {
                 <p className="text-[10px] text-[#64748B] font-sans mt-0.5">Automated recovery success comparison across deployed microservices</p>
               </div>
             </div>
-            
+
             <div className="h-[260px]">
               {chartData.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-[#64748B] font-mono text-xs">
@@ -158,7 +158,7 @@ export default function OrganizationPage() {
                   <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <XAxis dataKey="name" stroke="#64748B" fontSize={10} fontFamily="monospace" tickLine={false} />
                     <YAxis stroke="#64748B" fontSize={10} fontFamily="monospace" allowDecimals={false} tickLine={false} />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#CBD5E1', color: '#0F172A', fontFamily: 'monospace', fontSize: 11, borderRadius: '12px' }}
                     />
                     <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'monospace' }} />
@@ -183,7 +183,7 @@ export default function OrganizationPage() {
               </h3>
               <p className="text-[10px] text-[#64748B] font-sans mt-0.5">Cryptographically logged decision changes, pipeline transitions, and policy commits</p>
             </div>
-            
+
             <div className="relative">
               <Search className="h-3.5 w-3.5 absolute left-3 top-3 text-stone-400" />
               <input
@@ -232,7 +232,7 @@ export default function OrganizationPage() {
                         {JSON.stringify(log.details)}
                       </td>
                       <td className="py-3 px-4 text-right text-[#64748B] text-[11px]">
-                        {new Date(log.created_at).toLocaleString()}
+                        {formatDateTime(log.created_at)}
                       </td>
                     </tr>
                   ))
@@ -263,17 +263,16 @@ export default function OrganizationPage() {
               const isCurrent = activeProfile.email === profile.email;
 
               return (
-                <div 
+                <div
                   key={profile.email}
                   onClick={() => {
                     setSimulatedProfile(profile.email);
                     window.location.reload();
                   }}
-                  className={`p-5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between space-y-3 ${
-                    isCurrent 
-                      ? 'bg-[#EEF2FF] border-[#4F46E5] text-[#0F172A] shadow-xs' 
+                  className={`p-5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between space-y-3 ${isCurrent
+                      ? 'bg-[#EEF2FF] border-[#4F46E5] text-[#0F172A] shadow-xs'
                       : 'bg-white hover:bg-[#F8FAFC] border-[#E2E8F0] text-[#64748B]'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">

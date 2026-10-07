@@ -4,7 +4,7 @@ import {
   FileCode, UserCheck, Lock, ShieldCheck
 } from 'lucide-react';
 import { 
-  fetchIncidents, Incident, fetchPatchCandidateDetail, PatchCandidateDetail, getSimulatedProfile, createDecision, API_URL 
+  fetchIncidents, Incident, fetchPatchCandidateDetail, PatchCandidateDetail, getSimulatedProfile, createDecision, applyPatchCandidateAndCreatePR, API_URL 
 } from '../api';
 import { canApprovePatches, ROLE_CONFIGS, UserRole } from '../permissions';
 
@@ -96,13 +96,18 @@ export default function ReviewQueuePage() {
     }
     setIsSubmitting(true);
     try {
-      const result = await createDecision(
-        patchDetail.id,
-        status,
-        decisionReason || (status === 'APPROVED' ? 'Manual SRE approval verified in Sandbox.' : 'Rejected by SRE.')
-      );
-      setSubmitResult(`DECISION_${status}_APPLIED: Decision ID ${result.id}`);
-      setTimeout(() => setSubmitResult(null), 5000);
+      if (status === 'APPROVED') {
+        const prRes = await applyPatchCandidateAndCreatePR(patchDetail.id);
+        setSubmitResult(`RECOVERY_PR_CREATED: ${prRes.pull_request_url}`);
+      } else {
+        const result = await createDecision(
+          patchDetail.id,
+          status,
+          decisionReason || 'Rejected by SRE.'
+        );
+        setSubmitResult(`DECISION_${status}_APPLIED: Decision ID ${result.id}`);
+      }
+      setTimeout(() => setSubmitResult(null), 6000);
       loadPendingIncidents();
     } catch (err: any) {
       console.error('Failed to submit decision', err);

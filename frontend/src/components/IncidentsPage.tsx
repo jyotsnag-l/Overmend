@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { 
   Search, ChevronRight, Archive, RefreshCw, AlertTriangle, Zap
 } from 'lucide-react';
-import { fetchIncidents, Incident, triggerDemoIncident } from '../api';
+import { fetchIncidents, Incident, triggerDemoIncident, formatDateTime } from '../api';
 
 interface IncidentsPageProps {
   onNavigate: (page: string, params?: Record<string, any>) => void;
@@ -300,7 +300,7 @@ export default function IncidentsPage({ onNavigate }: IncidentsPageProps) {
                       {getSeverityBadge(inc.severity)}
                     </td>
                     <td className="py-3.5 px-4 text-[#64748B] text-xs font-mono">
-                      {new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {formatDateTime(inc.created_at)}
                     </td>
                     <td className="py-3.5 px-4">
                       {getStatusBadge(inc.status)}
