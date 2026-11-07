@@ -7,7 +7,7 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell,
   BarChart, Bar, CartesianGrid
 } from 'recharts';
-import { fetchOrgAnalytics, fetchIncidents, OrgAnalytics, Incident, API_URL, getHeaders, triggerDemoIncident } from '../api';
+import { fetchOrgAnalytics, fetchIncidents, OrgAnalytics, Incident, API_URL, getHeaders, triggerDemoIncident, formatDateTime } from '../api';
 
 interface DashboardPageProps {
   onNavigate: (page: string, params?: Record<string, any>) => void;
@@ -573,7 +573,7 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
                   </div>
                   <div className="flex items-center space-x-3.5">
                     <span className="text-[10px] text-[#64748B] font-mono">
-                      {new Date(inc.created_at).toLocaleTimeString()}
+                      {formatDateTime(inc.created_at)}
                     </span>
                     <span className="pill-mint font-bold">
                       {inc.status}

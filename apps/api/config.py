@@ -71,9 +71,12 @@ if settings.DATABASE_URL.startswith("postgresql://"):
     settings.DATABASE_URL = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 # Use SQLite for local development/testing when PostgreSQL is not explicitly configured or available
-if settings.ENVIRONMENT == "development":
-    settings.DATABASE_URL = "sqlite+aiosqlite:///./test_recovery.db"
-    settings.SYNC_DATABASE_URL = "sqlite:///./test_recovery.db"
+if settings.DATABASE_URL.startswith("postgresql://"):
+    settings.DATABASE_URL = settings.DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+asyncpg://",
+        1
+    )
 
 
 

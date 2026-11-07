@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 # Ensure all internal packages and apps/api are in sys.path
+# Reload patch workflow engine with pytest exit code 5 support
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 api_dir = os.path.join(root_dir, "apps", "api")
 if api_dir not in sys.path:
@@ -74,11 +75,10 @@ app = FastAPI(
 )
 
 # Set up CORS dynamically from configuration
-origins = [o.strip() for o in getattr(settings, "ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if origins else ["*"],
-    allow_credentials=True if origins != ["*"] else False,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

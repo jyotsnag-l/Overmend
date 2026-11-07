@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { 
   ArrowLeft, AlertTriangle, FileCode, GitBranch, Cpu, Code2, RefreshCw, 
-  CheckCircle2, Terminal, ArrowRight, ShieldCheck
+  CheckCircle2, Terminal, ArrowRight, ShieldCheck, ExternalLink, GitPullRequest
 } from 'lucide-react';
-import { fetchIncidentDetail, IncidentDetail, fetchPatchCandidateDetail, PatchCandidateDetail } from '../api';
+import { fetchIncidentDetail, IncidentDetail, fetchPatchCandidateDetail, PatchCandidateDetail, applyPatchCandidateAndCreatePR } from '../api';
 
 interface IncidentDetailPageProps {
   incidentId: string;
@@ -28,6 +28,29 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
   const [selectedPatch, setSelectedPatch] = useState<string | null>(null);
   const [patchDetail, setPatchDetail] = useState<PatchCandidateDetail | null>(null);
   const [loadingPatch, setLoadingPatch] = useState(false);
+
+  // Apply Patch & Create Recovery PR state
+  const [applyingPatch, setApplyingPatch] = useState(false);
+  const [prResult, setPrResult] = useState<{ pull_request_url: string; pull_request_number: number; branch_name: string; repository: string } | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  const handleApplyPatchAndCreatePR = async () => {
+    if (!selectedPatch || applyingPatch) return;
+    setApplyingPatch(true);
+    setApplyError(null);
+    setPrResult(null);
+
+    try {
+      const result = await applyPatchCandidateAndCreatePR(selectedPatch);
+      setPrResult(result);
+      loadIncident();
+    } catch (err: any) {
+      console.error("Failed to apply patch and create PR:", err);
+      setApplyError(err.message || "Failed to apply patch and create GitHub Recovery PR.");
+    } finally {
+      setApplyingPatch(false);
+    }
+  };
 
   const loadIncident = async () => {
     try {
@@ -394,6 +417,59 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
               ) : (
                 <div className="text-stone-500 font-mono text-xs py-10">Select a patch candidate to view AST diff.</div>
               )}
+
+              {/* SINGLE BUTTON: Apply Patch / Create Recovery PR */}
+              <div className="pt-4 border-t border-stone-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex-1">
+                  {prResult ? (
+                    <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-3 rounded-xl flex items-center space-x-3 text-xs font-mono">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                      <div>
+                        <span className="font-bold block text-emerald-950">Recovery PR Created Successfully!</span>
+                        <a
+                          href={prResult.pull_request_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-600 hover:text-indigo-800 underline font-bold flex items-center space-x-1 mt-0.5"
+                        >
+                          <span>View PR #{prResult.pull_request_number} on GitHub ({prResult.repository})</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    </div>
+                  ) : applyError ? (
+                    <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl flex items-center space-x-2 text-xs font-mono">
+                      <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+                      <span>{applyError}</span>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-stone-500 font-mono">
+                      {selectedPatch 
+                        ? `Selected Candidate #${selectedPatch.slice(0, 8)} — Ready to apply and create GitHub recovery PR.`
+                        : 'Select a candidate patch above to enable recovery PR creation.'}
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleApplyPatchAndCreatePR}
+                  disabled={!selectedPatch || applyingPatch}
+                  className="px-6 py-3 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-mono font-extrabold uppercase tracking-wider flex items-center justify-center space-x-2 rounded-xl transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                >
+                  {applyingPatch ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                      <span>Applying & Creating Recovery PR...</span>
+                    </>
+                  ) : (
+                    <>
+                      <GitPullRequest className="h-4 w-4 text-white" />
+                      <span>Apply Patch / Create Recovery PR</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </section>

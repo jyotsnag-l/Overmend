@@ -58,11 +58,11 @@ def main():
         "exception_type": "AssertionError",
         "exception_message": "assert 201 == 400 - Order exceeding stock quantity accepted with status 201 Created instead of 400 Bad Request",
         "stack_trace": """Traceback (most recent call last):
-  File "app/services/inventory_service.py", line 46, in validate_stock_availability
+  File "app/services/inventory_service.py", line 52, in validate_stock_availability
     if item.stock_quantity <= 0:
   File "tests/test_orders.py", line 44, in test_create_order_exceeding_stock_should_fail
     assert response.status_code == 400
-AssertionError: assert 201 == 400
+AssertionError: NEW TEST RUN 201 == 400
 + where 201 = <Response [201 Created]>.status_code""",
         "environment": "production",
         "git_commit": commit_sha,
