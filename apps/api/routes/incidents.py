@@ -950,13 +950,11 @@ async def apply_patch_candidate_and_create_pr(
     db_pr = models.PullRequest(
         id=f"pr_{uuid.uuid4().hex[:8]}",
         organization_id=org_id,
-        incident_id=incident.id,
+        project_id=project.id if project else incident.project_id,
         patch_candidate_id=patch.id,
         github_pr_number=pr_number,
         github_pr_url=pr_url,
-        branch_name=branch_name,
-        status="OPEN",
-        ci_status="SUCCESS"
+        status="OPEN"
     )
     db.add(db_pr)
 
