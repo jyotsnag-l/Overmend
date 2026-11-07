@@ -10,6 +10,7 @@ WORKDIR /app/apps/api
 
 # Install dependencies, including local packages in editable mode
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install opentelemetry-distro opentelemetry-exporter-otlp && opentelemetry-bootstrap -a install
 
 EXPOSE 8000
 

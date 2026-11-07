@@ -26,5 +26,3 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: celery # the API still queues tasks, but we do not trace the queue yet
-    depends_on:
-      - otel-collector
