@@ -1,0 +1,30 @@
+# Overlay for Overmend's docker-compose.yml. Run on a BRANCH, with a test repo and dummy tokens.
+#   docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d --build
+#
+# Replace the two things marked CHANGE:
+#   1. "api" must be your API service's name (check: docker compose config --services)
+#   2. the command must be your API's real start command, with "opentelemetry-instrument" in front
+#
+# Only the API is traced for now. Do NOT trace the Celery workers yet (see docs/connect-overmend.md).
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: [ "--config=/etc/otel.yaml" ]
+    user: "0"
+    volumes:
+      - ./otel/otel-collector.yaml:/etc/otel.yaml
+      - ./otel/out:/out
+
+  api:
+    # CHANGE: your API service name
+    command: [ "opentelemetry-instrument", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" ] # CHANGE: your real command
+    environment:
+      OTEL_SERVICE_NAME: overmend-api
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: celery # the API still queues tasks, but we do not trace the queue yet
+    depends_on:
+      - otel-collector
