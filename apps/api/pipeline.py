@@ -31,6 +31,7 @@ TESTED = "TESTED"
 TRUST_EVALUATED = "TRUST_EVALUATED"
 AUTO_MERGE = "AUTO_MERGE"
 HUMAN_REVIEW = "HUMAN_REVIEW"
+PR_CREATED = "PR_CREATED"
 MERGED = "MERGED"
 VERIFIED = "VERIFIED"
 REJECTED = "REJECTED"
@@ -394,7 +395,7 @@ async def process_event_pipeline(
             return inc_res.scalar_one()
 
     # Find active incident for the fingerprint (not in terminal state)
-    terminal_states = {MERGED, VERIFIED, REJECTED, REVERTED}
+    terminal_states = {MERGED, VERIFIED, REJECTED, REVERTED, PR_CREATED}
     res = await db.execute(
         select(models.Incident)
         .where(models.Incident.project_id == project.id)
