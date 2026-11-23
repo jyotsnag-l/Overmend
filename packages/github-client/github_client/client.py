@@ -387,3 +387,20 @@ class GitHubAppClient:
             return True
         return False
 
+    def get_pull_request(self, repo: str, pr_number: int) -> Dict[str, Any]:
+        """Fetches status and metadata for a pull request."""
+        if (
+            self.mock
+            or "/" not in repo
+            or repo.startswith("mock")
+            or os.getenv("GITHUB_MOCK", "false").lower() == "true"
+        ):
+            return {"number": pr_number, "state": "closed", "merged": True}
+        url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
+        response = requests.get(url, headers=self._headers())
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        return response.json()
+
+

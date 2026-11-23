@@ -664,6 +664,24 @@ async def get_incident(
     )
     history_list = hist_res.scalars().all()
 
+    # Fetch latest PullRequest created for this incident if any
+    pr_query = (
+        select(models.PullRequest)
+        .join(models.PatchCandidate)
+        .where(models.PatchCandidate.incident_id == incident_id)
+        .order_by(models.PullRequest.created_at.desc() if hasattr(models.PullRequest, 'created_at') else models.PullRequest.id.desc())
+    )
+    pr_res = await db.execute(pr_query)
+    latest_pr = pr_res.scalars().first()
+    pr_info = None
+    if latest_pr:
+        pr_info = {
+            "id": latest_pr.id,
+            "github_pr_number": latest_pr.github_pr_number,
+            "github_pr_url": latest_pr.github_pr_url,
+            "status": latest_pr.status
+        }
+
     return {
         "id": incident.id,
         "project_id": incident.project_id,
@@ -717,8 +735,90 @@ async def get_incident(
                 "is_valid": pc.is_valid,
                 "created_at": pc.created_at
             } for pc in patch_candidates
-        ]
+        ],
+        "pull_request": pr_info
     }
+
+
+@router.post("/incidents/{incident_id}/sync-pr")
+async def sync_incident_pull_request_status(
+    incident_id: str,
+    db: AsyncSession = Depends(get_db),
+    membership: models.Membership = Depends(require_membership)
+):
+    """
+    Checks the latest status of the GitHub Pull Request for this incident directly from GitHub API.
+    If GitHub reports the PR is merged, transitions the incident to VERIFIED immediately.
+    """
+    org_id = membership.organization_id
+    inc_res = await db.execute(
+        select(models.Incident)
+        .where(models.Incident.id == incident_id)
+        .where(models.Incident.organization_id == org_id)
+    )
+    incident = inc_res.scalar_one_or_none()
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    pr_query = (
+        select(models.PullRequest)
+        .join(models.PatchCandidate)
+        .where(models.PatchCandidate.incident_id == incident_id)
+        .order_by(models.PullRequest.id.desc())
+    )
+    pr_res = await db.execute(pr_query)
+    pr_record = pr_res.scalars().first()
+    if not pr_record:
+        return {"status": incident.status, "message": "No pull request associated with this incident yet."}
+
+    # Resolve repo
+    proj_res = await db.execute(select(models.Project).where(models.Project.id == incident.project_id))
+    proj = proj_res.scalar_one_or_none()
+    repo = (incident.affected_repository or (proj.repository if proj else None) or "").strip()
+
+    if not repo:
+        return {"status": incident.status, "message": "Repository not defined for this incident."}
+
+    from github_client.client import GitHubAppClient
+    from config import settings
+    app_id = settings.GITHUB_APP_ID or os.getenv("GITHUB_APP_ID", "mock")
+    private_key = settings.GITHUB_PRIVATE_KEY or os.getenv("GITHUB_PRIVATE_KEY", "mock")
+    installation_id = settings.GITHUB_INSTALLATION_ID or os.getenv("GITHUB_INSTALLATION_ID")
+    client = GitHubAppClient(app_id=app_id, private_key=private_key, installation_id=installation_id)
+
+    pr_data = client.get_pull_request(repo, pr_record.github_pr_number)
+    is_merged = pr_data.get("merged", False)
+    pr_state = pr_data.get("state", "open")
+
+    if is_merged:
+        pr_record.status = "MERGED"
+        if incident.status != "VERIFIED":
+            import pipeline
+            await pipeline.transition_state(
+                db, incident, "VERIFIED",
+                reason=f"Pull Request #{pr_record.github_pr_number} confirmed merged on GitHub. Fix verified."
+            )
+        await db.commit()
+        return {
+            "status": "VERIFIED",
+            "pull_request_status": "MERGED",
+            "message": f"PR #{pr_record.github_pr_number} is merged. Incident transitioned to VERIFIED."
+        }
+    elif pr_state == "closed" and not is_merged:
+        pr_record.status = "CLOSED"
+        await db.commit()
+        return {
+            "status": incident.status,
+            "pull_request_status": "CLOSED",
+            "message": f"PR #{pr_record.github_pr_number} was closed without being merged."
+        }
+
+    return {
+        "status": incident.status,
+        "pull_request_status": "OPEN",
+        "message": f"PR #{pr_record.github_pr_number} is still open on GitHub."
+    }
+
 
 
 @router.get("/patch-candidates/{candidate_id}")

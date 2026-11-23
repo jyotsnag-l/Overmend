@@ -273,32 +273,48 @@ def classify_severity(
                 if lvl in freq_thresholds and frequency >= freq_thresholds[lvl]:
                     return lvl
                     
-    # 2. Default severity rules
-    severity = MEDIUM
-    critical_exceptions = {"SystemError", "MemoryError", "OperationalError", "DatabaseError"}
-    high_exceptions = {"ValueError", "KeyError", "TypeError", "ZeroDivisionError", "AssertionError"}
+    # 2. Intelligent Severity Classification
+    # Critical: Fatal platform/database/OS disruptions or extreme outage-causing runtime conditions
+    critical_exceptions = {
+        "SystemError", "MemoryError", "OperationalError", "DatabaseError", "RecursionError"
+    }
+    # High: Data integrity, broken contracts, missing keys, assertion/auth failures
+    high_exceptions = {
+        "AssertionError", "PermissionError", "KeyError", "NotImplementedError"
+    }
+    # Medium: Common operational/runtime exceptions that have contained blast radius (e.g., standard input/math/type bounds)
+    medium_exceptions = {
+        "ValueError", "TypeError", "ZeroDivisionError", "IndexError", "AttributeError"
+    }
     
     if exception_type in critical_exceptions:
         severity = CRITICAL
     elif exception_type in high_exceptions:
         severity = HIGH
-    else:
+    elif exception_type in medium_exceptions:
         severity = MEDIUM
+    else:
+        severity = LOW
         
-    # Promote severity in production environment
+    # Promote severity in production ONLY if error frequency indicates active cascade/storm:
+    # A single isolated division-by-zero or value error should NOT be flagged as CRITICAL.
     if environment.lower() == "production":
-        if severity == LOW:
-            severity = MEDIUM
-        elif severity == MEDIUM:
-            severity = HIGH
-        elif severity == HIGH:
+        if frequency >= 25:
+            # High error frequency storm in production promotes to CRITICAL
             severity = CRITICAL
+        elif frequency >= 5:
+            # Repetitive failure promotes one tier (MEDIUM -> HIGH, LOW -> MEDIUM)
+            if severity == LOW:
+                severity = MEDIUM
+            elif severity == MEDIUM:
+                severity = HIGH
+        else:
+            # Isolated single failure maintains its genuine contextual severity
+            pass
             
-    # Upgrade severity if error frequency is extremely high
+    # Upgrade severity if error frequency is extremely high (flood condition across any env)
     if frequency >= 50:
         severity = CRITICAL
-    elif frequency >= 20 and severity == MEDIUM:
-        severity = HIGH
         
     return severity
 

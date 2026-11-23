@@ -361,6 +361,23 @@ export async function applyPatchCandidateAndCreatePR(candidateId: string): Promi
   return res.json();
 }
 
+export async function syncIncidentPR(incidentId: string): Promise<{
+  status: string;
+  pull_request_status?: string;
+  message: string;
+}> {
+  const res = await fetch(`${API_URL}/api/v1/incidents/${incidentId}/sync-pr`, {
+    method: 'POST',
+    headers: getHeaders()
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to sync PR status');
+  }
+  return res.json();
+}
+
+
 
 export async function evaluateDecision(payload: {
   patch_candidate_id: string;

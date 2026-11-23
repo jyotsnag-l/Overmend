@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from database import get_db
 import models
+import pipeline
 from github_client import verify_signature
 
 logger = logging.getLogger("api.webhooks")
@@ -156,6 +157,60 @@ async def github_webhook(
             logger.info(f"Handled installation_repositories removed: {len(repos_removed)} repositories")
 
         return {"status": "ok", "message": "Installation repositories updated"}
+
+    # Handle GitHub Pull Request events (e.g. PR merged or closed)
+    if x_github_event == "pull_request":
+        action = payload.get("action")
+        pr_data = payload.get("pull_request", {})
+        repo_data = payload.get("repository", {})
+        repo_full_name = repo_data.get("full_name")
+        pr_number = pr_data.get("number")
+        is_merged = pr_data.get("merged", False)
+
+        logger.info(f"Received pull_request event: action={action}, repo={repo_full_name}, PR #{pr_number}, merged={is_merged}")
+
+        if repo_full_name and pr_number:
+            # Locate PR record
+            pr_query = (
+                select(models.PullRequest)
+                .join(models.Project)
+                .where(models.Project.repository == repo_full_name)
+                .where(models.PullRequest.github_pr_number == pr_number)
+            )
+            pr_res = await db.execute(pr_query)
+            pr_record = pr_res.scalar_one_or_none()
+
+            if pr_record:
+                # Find associated incident
+                cand_query = select(models.PatchCandidate).where(models.PatchCandidate.id == pr_record.patch_candidate_id)
+                cand_res = await db.execute(cand_query)
+                cand = cand_res.scalar_one_or_none()
+
+                incident = None
+                if cand:
+                    inc_query = select(models.Incident).where(models.Incident.id == cand.incident_id)
+                    inc_res = await db.execute(inc_query)
+                    incident = inc_res.scalar_one_or_none()
+
+                if action == "closed" and is_merged:
+                    pr_record.status = "MERGED"
+                    if incident and incident.status != "VERIFIED":
+                        await pipeline.transition_state(
+                            db, incident, "VERIFIED",
+                            reason=f"Pull Request #{pr_number} merged into default branch. Incident fix verified."
+                        )
+                        logger.info(f"Incident {incident.id} transitioned to VERIFIED via GitHub pull_request webhook")
+                    await db.commit()
+                elif action == "closed" and not is_merged:
+                    pr_record.status = "CLOSED"
+                    if incident and incident.status == "PR_CREATED":
+                        await pipeline.transition_state(
+                            db, incident, "REJECTED",
+                            reason=f"Pull Request #{pr_number} was closed without being merged."
+                        )
+                    await db.commit()
+
+        return {"status": "ok", "message": f"Pull request event '{action}' processed"}
 
     # Handle CI status updates
     if x_github_event in ("check_run", "check_suite", "status"):

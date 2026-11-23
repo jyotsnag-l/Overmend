@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { 
   ArrowLeft, AlertTriangle, FileCode, GitBranch, Cpu, Code2, RefreshCw, 
-  CheckCircle2, Terminal, ArrowRight, ShieldCheck, ExternalLink, GitPullRequest
+  CheckCircle2, Terminal, ArrowRight, ShieldCheck, ExternalLink, GitPullRequest, GitMerge
 } from 'lucide-react';
-import { fetchIncidentDetail, IncidentDetail, fetchPatchCandidateDetail, PatchCandidateDetail, applyPatchCandidateAndCreatePR } from '../api';
+import { fetchIncidentDetail, IncidentDetail, fetchPatchCandidateDetail, PatchCandidateDetail, applyPatchCandidateAndCreatePR, syncIncidentPR } from '../api';
 
 interface IncidentDetailPageProps {
   incidentId: string;
@@ -33,6 +33,23 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
   const [applyingPatch, setApplyingPatch] = useState(false);
   const [prResult, setPrResult] = useState<{ pull_request_url: string; pull_request_number: number; branch_name: string; repository: string } | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [syncingPR, setSyncingPR] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const handleSyncPR = async () => {
+    if (syncingPR || !incident) return;
+    setSyncingPR(true);
+    setSyncMessage(null);
+    try {
+      const res = await syncIncidentPR(incident.id);
+      setSyncMessage(res.message);
+      await loadIncident();
+    } catch (err: any) {
+      setSyncMessage(err.message || 'Failed to sync PR status');
+    } finally {
+      setSyncingPR(false);
+    }
+  };
 
   const handleApplyPatchAndCreatePR = async () => {
     if (!selectedPatch || applyingPatch) return;
@@ -420,7 +437,7 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
 
               {/* SINGLE BUTTON: Apply Patch / Create Recovery PR */}
               <div className="pt-4 border-t border-stone-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex-1">
+                <div className="flex-1 space-y-1">
                   {prResult ? (
                     <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-3 rounded-xl flex items-center space-x-3 text-xs font-mono">
                       <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
@@ -449,26 +466,55 @@ export default function IncidentDetailPage({ incidentId, onNavigate }: IncidentD
                         : 'Select a candidate patch above to enable recovery PR creation.'}
                     </p>
                   )}
+                  {syncMessage && (
+                    <p className="text-[11px] font-mono text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-lg">
+                      {syncMessage}
+                    </p>
+                  )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleApplyPatchAndCreatePR}
-                  disabled={!selectedPatch || applyingPatch}
-                  className="px-6 py-3 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-mono font-extrabold uppercase tracking-wider flex items-center justify-center space-x-2 rounded-xl transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                >
-                  {applyingPatch ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin text-white" />
-                      <span>Applying & Creating Recovery PR...</span>
-                    </>
-                  ) : (
-                    <>
-                      <GitPullRequest className="h-4 w-4 text-white" />
-                      <span>Apply Patch / Create Recovery PR</span>
-                    </>
+                <div className="flex items-center space-x-3 flex-shrink-0">
+                  {incident?.status === 'PR_CREATED' && (
+                    <button
+                      type="button"
+                      onClick={handleSyncPR}
+                      disabled={syncingPR}
+                      className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-extrabold uppercase tracking-wider flex items-center justify-center space-x-2 rounded-xl transition shadow-md disabled:opacity-50"
+                      title="Sync merge status directly from GitHub"
+                    >
+                      {syncingPR ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                          <span>Checking GitHub...</span>
+                        </>
+                      ) : (
+                        <>
+                          <GitMerge className="h-4 w-4 text-white" />
+                          <span>Sync PR Status (Verify)</span>
+                        </>
+                      )}
+                    </button>
                   )}
-                </button>
+
+                  <button
+                    type="button"
+                    onClick={handleApplyPatchAndCreatePR}
+                    disabled={!selectedPatch || applyingPatch}
+                    className="px-6 py-3 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-mono font-extrabold uppercase tracking-wider flex items-center justify-center space-x-2 rounded-xl transition shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {applyingPatch ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                        <span>Applying & Creating Recovery PR...</span>
+                      </>
+                    ) : (
+                      <>
+                        <GitPullRequest className="h-4 w-4 text-white" />
+                        <span>Apply Patch / Create Recovery PR</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
