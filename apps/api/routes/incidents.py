@@ -957,13 +957,25 @@ async def apply_patch_candidate_and_create_pr(
     repo = (incident.affected_repository or (project.repository if project else None) or "seed-org/seed-repo").strip()
     
     # DYNAMIC COMMIT SHA:
+    # Always dynamically fetch the latest commit SHA from the repository's default branch on GitHub
+    # so that the recovery branch is branched off the newest HEAD, avoiding merge conflicts with prior merged PRs.
+    from github_client.client import GitHubAppClient
+    from config import settings
+    app_id = settings.GITHUB_APP_ID or os.getenv("GITHUB_APP_ID", "mock")
+    private_key = settings.GITHUB_PRIVATE_KEY or os.getenv("GITHUB_PRIVATE_KEY", "mock")
+    installation_id = settings.GITHUB_INSTALLATION_ID or os.getenv("GITHUB_INSTALLATION_ID")
+    gh_client = GitHubAppClient(app_id=app_id, private_key=private_key, installation_id=installation_id)
+
     commit_sha = None
-    if incident.context and isinstance(incident.context, dict):
+    try:
+        commit_sha = gh_client.get_latest_commit_sha(repo)
+    except Exception as e:
+        logger.warning(f"Failed to fetch live latest commit SHA for {repo}: {e}")
+
+    if not commit_sha and incident.context and isinstance(incident.context, dict):
         commit_sha = incident.context.get("commit_sha")
     if not commit_sha and project and getattr(project, "last_synced_commit", None):
         commit_sha = project.last_synced_commit
-    if not commit_sha:
-        commit_sha = "a9ca1cde1290cffc76efaea7d4eba107765ebf43"
 
     # Fetch Trust Evaluation evidence if available
     te_res = await db.execute(

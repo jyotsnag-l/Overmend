@@ -410,15 +410,20 @@ async def process_event_pipeline(
             inc_res = await db.execute(select(models.Incident).where(models.Incident.id == processed.incident_id))
             return inc_res.scalar_one()
 
-    # Find active incident for the fingerprint (not in terminal state)
-    terminal_states = {MERGED, VERIFIED, REJECTED, REVERTED, PR_CREATED}
-    res = await db.execute(
-        select(models.Incident)
-        .where(models.Incident.project_id == project.id)
-        .where(models.Incident.fingerprint == fingerprint)
-        .where(models.Incident.status.notin_(terminal_states))
-    )
-    incident = res.scalar_one_or_none()
+    # Deduplication check: Set ALLOW_DUPLICATE_INCIDENTS=True to register every error as a distinct incident card
+    allow_duplicates = os.getenv("ALLOW_DUPLICATE_INCIDENTS", "true").lower() == "true"
+    
+    incident = None
+    if not allow_duplicates:
+        # Find active incident for the fingerprint (not in terminal state)
+        terminal_states = {MERGED, VERIFIED, REJECTED, REVERTED, PR_CREATED}
+        res = await db.execute(
+            select(models.Incident)
+            .where(models.Incident.project_id == project.id)
+            .where(models.Incident.fingerprint == fingerprint)
+            .where(models.Incident.status.notin_(terminal_states))
+        )
+        incident = res.scalar_one_or_none()
     
     # Fetch Project Policy
     policy_res = await db.execute(
@@ -502,8 +507,8 @@ async def process_event_pipeline(
         )
         db.add(history)
 
-    # Determine actionability
-    is_actionable = (severity in {HIGH, CRITICAL}) or is_anomaly
+    # Determine actionability: MEDIUM, HIGH, and CRITICAL errors trigger autonomous self-healing
+    is_actionable = (severity in {MEDIUM, HIGH, CRITICAL}) or is_anomaly
     if env.lower() == "development":
         is_actionable = False
 
